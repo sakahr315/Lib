@@ -1,7 +1,12 @@
 --[[
 ╔═══════════════════════════════════════════════════════════════════════════╗
-║                         CyanUI  v2.1.0                                   ║
+║                         CyanUI  v2.2.0                                   ║
 ║              A polished Roblox UI library with dark-cyan theme            ║
+╠═══════════════════════════════════════════════════════════════════════════╣
+║  New in v2.2:                                                             ║
+║  • Hover tooltips via opts.Tooltip on any element                         ║
+║  • Chainable API: :SetVisible / :SetEnabled / :SetTooltip / Connect*      ║
+║  • All existing OnClick / OnChanged / OnPressed still return Connection   ║
 ╠═══════════════════════════════════════════════════════════════════════════╣
 ║  New in v2.1 (visual overhaul):                                           ║
 ║  • Refined dark-cyan palette + radial backdrop glow                       ║
@@ -379,6 +384,118 @@ new("UIListLayout", {
     VerticalAlignment   = Enum.VerticalAlignment.Bottom,
     Parent              = NotifHolder,
 })
+
+-- =========================================================================
+-- 6b. TOOLTIP (shared singleton, follows the mouse)
+-- =========================================================================
+local Tooltip = new("Frame", {
+    Name                   = "Tooltip",
+    Size                   = UDim2.new(0, 0, 0, 24),
+    AutomaticSize          = Enum.AutomaticSize.X,
+    BackgroundColor3       = Color3.fromRGB(20, 26, 34),
+    BackgroundTransparency = 1,
+    BorderSizePixel        = 0,
+    Visible                = false,
+    ZIndex                 = 10000,
+    Parent                 = ScreenGui,
+})
+corner(Tooltip, 6)
+stroke(Tooltip, Color3.fromRGB(255,255,255), 1, 0.85)
+pad(Tooltip, nil, 8, 8, 4, 4)
+local TooltipLbl = new("TextLabel", {
+    BackgroundTransparency = 1,
+    AutomaticSize          = Enum.AutomaticSize.X,
+    Size                   = UDim2.new(0, 0, 1, 0),
+    Font                   = FONT_REG,
+    TextSize               = 12,
+    TextColor3             = Color3.fromRGB(230, 234, 240),
+    TextTransparency       = 1,
+    TextXAlignment         = Enum.TextXAlignment.Left,
+    Text                   = "",
+    ZIndex                 = 10001,
+    Parent                 = Tooltip,
+})
+
+local _tipConn
+local function showTooltip(text)
+    if not text or text == "" then return end
+    TooltipLbl.Text = text
+    Tooltip.Visible = true
+    tw(Tooltip,    TI_Q, { BackgroundTransparency = 0 })
+    tw(TooltipLbl, TI_Q, { TextTransparency = 0 })
+    if _tipConn then _tipConn:Disconnect() end
+    local function follow()
+        local mp = UIS:GetMouseLocation()
+        Tooltip.Position = UDim2.new(0, mp.X + 14, 0, mp.Y + 18)
+    end
+    follow()
+    _tipConn = RunService.RenderStepped:Connect(follow)
+end
+local function hideTooltip()
+    if _tipConn then _tipConn:Disconnect(); _tipConn = nil end
+    tw(Tooltip,    TI_Q, { BackgroundTransparency = 1 })
+    tw(TooltipLbl, TI_Q, { TextTransparency = 1 })
+    task.delay(0.15, function()
+        if Tooltip.BackgroundTransparency >= 1 then Tooltip.Visible = false end
+    end)
+end
+
+--- Attach a hover tooltip to any GuiObject.
+local function attachTooltip(frame, text)
+    if not text or text == "" then return end
+    local current = text
+    frame.MouseEnter:Connect(function() showTooltip(current) end)
+    frame.MouseLeave:Connect(hideTooltip)
+    return function(newText) current = newText end  -- setter
+end
+
+-- =========================================================================
+-- 6c. CHAINABLE API DECORATOR
+-- =========================================================================
+--- Adorn any element api with chainable helpers. Wraps existing OnX methods
+--- into Connect* aliases that return the api itself instead of a Connection.
+local function decorate(api, frame, opts)
+    opts = opts or {}
+
+    -- tooltip
+    local _tipSet = attachTooltip(frame, opts.Tooltip)
+    function api:SetTooltip(t)
+        if _tipSet then _tipSet(t)
+        else _tipSet = attachTooltip(frame, t) end
+        return self
+    end
+
+    -- visibility / enabled
+    function api:SetVisible(v) frame.Visible = v and true or false; return self end
+    function api:SetEnabled(v)
+        frame.Active = v and true or false
+        for _, d in ipairs(frame:GetDescendants()) do
+            if d:IsA("TextButton") or d:IsA("TextBox") then
+                d.Active      = v and true or false
+                d.AutoButtonColor = false
+            end
+        end
+        tw(frame, TI_Q, { BackgroundTransparency = v and 0 or 0.5 })
+        return self
+    end
+    function api:GetFrame() return frame end
+
+    -- Chainable variants of common handlers
+    local function chain(name, alias)
+        if type(api[name]) == "function" and not api[alias] then
+            api[alias] = function(self, fn)
+                api[name](self, fn)
+                return self
+            end
+        end
+    end
+    chain("OnClick",   "ConnectClick")
+    chain("OnHover",   "ConnectHover")
+    chain("OnChanged", "ConnectChanged")
+    chain("OnPressed", "ConnectPressed")
+
+    return api
+end
 
 -- =========================================================================
 -- 7. LIBRARY ROOT
@@ -1223,7 +1340,7 @@ function Library:Window(opts)
                 --- @param text string
                 function api:SetLabel(text)  lbl.Text = text end
                 function api:Remove()        f:Destroy() end
-                return api
+                return decorate(api, f, opts)
             end
 
             -- ============================================================
@@ -1384,7 +1501,7 @@ function Library:Window(opts)
                 if Win._pendingConfig and opts.Flag and Win._pendingConfig[opts.Flag] ~= nil then
                     api:Set(Win._pendingConfig[opts.Flag])
                 end
-                return api
+                return decorate(api, f, opts)
             end
 
             -- ============================================================
@@ -1494,7 +1611,7 @@ function Library:Window(opts)
                 if Win._pendingConfig and opts.Flag and Win._pendingConfig[opts.Flag] ~= nil then
                     api:Set(Win._pendingConfig[opts.Flag])
                 end
-                return api
+                return decorate(api, f, opts)
             end
 
             -- ============================================================
@@ -1543,7 +1660,7 @@ function Library:Window(opts)
                 if Win._pendingConfig and opts.Flag and Win._pendingConfig[opts.Flag] ~= nil then
                     api:Set(Win._pendingConfig[opts.Flag])
                 end
-                return api
+                return decorate(api, f, opts)
             end
 
             -- ============================================================
@@ -1604,7 +1721,7 @@ function Library:Window(opts)
                 function api:OnPressed(fn) return pressed:Connect(safeCallback(fn, notifyFn)) end
 
                 if opts.Flag then Library.Flags[opts.Flag] = api end
-                return api
+                return decorate(api, f, opts)
             end
 
             -- ============================================================
@@ -1779,7 +1896,7 @@ function Library:Window(opts)
                 if Win._pendingConfig and opts.Flag and Win._pendingConfig[opts.Flag] ~= nil then
                     api:Set(Win._pendingConfig[opts.Flag])
                 end
-                return api
+                return decorate(api, f, opts)
             end
 
             -- ============================================================
@@ -2030,7 +2147,7 @@ function Library:Window(opts)
                 function api:OnChanged(fn) return changed:Connect(safeCallback(fn, notifyFn)) end
 
                 if opts.Flag then Library.Flags[opts.Flag] = api end
-                return api
+                return decorate(api, f, opts)
             end
 
             -- ============================================================
@@ -2091,7 +2208,7 @@ function Library:Window(opts)
                 end
 
                 function api:Remove() f:Destroy() end
-                return api
+                return decorate(api, f, opts)
             end
 
             -- ============================================================
@@ -2189,7 +2306,7 @@ function Library:Window(opts)
                     rows = {}; buildRows()
                 end
                 function api:Remove() f:Destroy() end
-                return api
+                return decorate(api, f, opts)
             end
 
             return Tab
