@@ -1,25 +1,15 @@
 --[[
 ╔═══════════════════════════════════════════════════════════════════════════╗
-║                         CyanUI  v2.0.0                                   ║
+║                         CyanUI  v2.1.0                                   ║
 ║              A polished Roblox UI library with dark-cyan theme            ║
 ╠═══════════════════════════════════════════════════════════════════════════╣
-║  New in v2:                                                               ║
-║  • Clean signal-based API (Connect/Disconnect) instead of raw callbacks   ║
-║  • Chainable element builder API                                          ║
-║  • Single shared input router — no global listener leaks                  ║
-║  • Full connection cleanup on Destroy()                                   ║
-║  • HSV color picker with hue bar + SV square                              ║
-║  • Typed notifications (success / warning / error / info)                 ║
-║  • Dropdown search filter                                                 ║
-║  • Progress bar element                                                   ║
-║  • Data table element                                                     ║
-║  • Context menu (right-click any element)                                 ║
-║  • Theme hot-swap via Library:SetTheme()                                  ║
-║  • Config versioning + per-element Save=false opt-out                     ║
-║  • Auto-save debounce (500 ms)                                            ║
-║  • Error boundaries — callback errors show a notification, not a crash   ║
-║  • Scroll fade gradients on content areas                                 ║
-║  • LuaDoc comments throughout                                             ║
+║  New in v2.1 (visual overhaul):                                           ║
+║  • Refined dark-cyan palette + radial backdrop glow                       ║
+║  • Sidebar with active-tab cyan accent bar                                ║
+║  • Polished section headers, unified element cards                        ║
+║  • Larger toggles, slimmer slider with right-aligned % readout            ║
+║  • Top-right notifications with cyan side bar                             ║
+║  • Public API unchanged — drop-in replacement for v2.0                    ║
 ╠═══════════════════════════════════════════════════════════════════════════╣
 ║  Loader:                                                                  ║
 ║    local UI = loadstring(game:HttpGet("https://your-host/CyanUI.lua"))()  ║
@@ -136,22 +126,23 @@ end
 -- =========================================================================
 local Themes = {
     Default = {
-        Background       = Color3.fromRGB(18, 20, 28),
-        Surface          = Color3.fromRGB(26, 29, 38),
-        SurfaceElevated  = Color3.fromRGB(32, 35, 46),
-        Card             = Color3.fromRGB(28, 31, 40),
-        Sidebar          = Color3.fromRGB(22, 24, 32),
-        Border           = Color3.fromRGB(255, 255, 255),
-        Foreground       = Color3.fromRGB(240, 242, 245),
-        MutedForeground  = Color3.fromRGB(160, 165, 175),
-        Primary          = Color3.fromRGB(64, 196, 220),
-        PrimaryGlow      = Color3.fromRGB(120, 220, 240),
-        PrimaryForeground= Color3.fromRGB(15, 18, 24),
-        Accent           = Color3.fromRGB(40, 80, 100),
-        Destructive      = Color3.fromRGB(230, 80,  60),
-        Success          = Color3.fromRGB(70,  200, 130),
+        Background       = Color3.fromRGB(11, 16, 20),   -- near-black with cool undertone
+        Surface          = Color3.fromRGB(18, 26, 34),   -- content area
+        SurfaceElevated  = Color3.fromRGB(23, 33, 43),   -- chips, popups, hover
+        Card             = Color3.fromRGB(18, 26, 34),   -- element row card
+        CardHover        = Color3.fromRGB(23, 33, 43),
+        Sidebar          = Color3.fromRGB(14, 20, 26),   -- slightly darker than surface
+        Border           = Color3.fromRGB(255, 255, 255),-- used with alpha
+        Foreground       = Color3.fromRGB(230, 234, 240),
+        MutedForeground  = Color3.fromRGB(138, 148, 161),
+        Primary          = Color3.fromRGB(63,  200, 220),
+        PrimaryGlow      = Color3.fromRGB(123, 224, 238),
+        PrimaryForeground= Color3.fromRGB(8,   14,  18),
+        Accent           = Color3.fromRGB(28,  56,  68),
+        Destructive      = Color3.fromRGB(230, 90,  90),
+        Success          = Color3.fromRGB(80,  200, 140),
         Warning          = Color3.fromRGB(230, 180, 80),
-        Info             = Color3.fromRGB(80,  140, 230),
+        Info             = Color3.fromRGB(90,  150, 230),
     },
     Amethyst = {
         Background       = Color3.fromRGB(20, 18, 30),
@@ -451,51 +442,38 @@ function Library:Notify(opts)
     local duration  = opts.Duration or 5
 
     local card = new("Frame", {
-        Size                  = UDim2.new(1, 0, 0, 0),
-        AutomaticSize         = Enum.AutomaticSize.Y,
-        BackgroundColor3      = theme.SurfaceElevated,
+        Size                   = UDim2.new(1, 0, 0, 0),
+        AutomaticSize          = Enum.AutomaticSize.Y,
+        BackgroundColor3       = theme.SurfaceElevated,
         BackgroundTransparency = 1,
-        Parent                = NotifHolder,
+        Parent                 = NotifHolder,
     })
-    corner(card, 10)
-    stroke(card, theme.Border, 1, 0.88)
-    pad(card, nil, 14, 14, 10, 12)
+    corner(card, 8)
+    stroke(card, theme.Border, 1, 0.9)
+    pad(card, nil, 16, 14, 12, 14)
 
-    -- left accent stripe
-    new("Frame", {
-        Size             = UDim2.new(0, 3, 1, -20),
-        Position         = UDim2.new(0, 0, 0, 10),
+    -- left accent bar (2px, full height)
+    local accentBar = new("Frame", {
+        Size             = UDim2.new(0, 2, 1, 0),
+        Position         = UDim2.new(0, 0, 0, 0),
         BackgroundColor3 = accentCol,
         BorderSizePixel  = 0,
         Parent           = card,
+        ZIndex           = card.ZIndex + 1,
     })
 
-    -- icon + title row
-    local titleRow = new("Frame", {
-        BackgroundTransparency = 1,
-        Size                   = UDim2.new(1, 0, 0, 18),
-        Parent                 = card,
-    })
-    new("TextLabel", {
-        BackgroundTransparency = 1,
-        Size                   = UDim2.new(0, 18, 1, 0),
-        Font                   = FONT_BOLD,
-        TextSize               = 14,
-        TextColor3             = accentCol,
-        Text                   = icon,
-        TextXAlignment         = Enum.TextXAlignment.Left,
-        Parent                 = titleRow,
-    })
+    -- vertical stack: title + body
+    listL(card, 4)
+
     local titleLbl = new("TextLabel", {
         BackgroundTransparency = 1,
-        Position               = UDim2.new(0, 22, 0, 0),
-        Size                   = UDim2.new(1, -22, 1, 0),
-        Font                   = FONT_BOLD,
-        TextSize               = 14,
+        Size                   = UDim2.new(1, 0, 0, 16),
+        Font                   = FONT_MED,
+        TextSize               = 13,
         TextColor3             = theme.Foreground,
         TextXAlignment         = Enum.TextXAlignment.Left,
         Text                   = opts.Title or "Notification",
-        Parent                 = titleRow,
+        Parent                 = card,
     })
     local bodyLbl = new("TextLabel", {
         BackgroundTransparency = 1,
@@ -509,46 +487,32 @@ function Library:Notify(opts)
         Text                   = opts.Content or "",
         Parent                 = card,
     })
-    listL(card, 4)
 
-    -- progress bar
-    local barBg = new("Frame", {
-        Size             = UDim2.new(1, 0, 0, 2),
-        BackgroundColor3 = theme.Surface,
-        BorderSizePixel  = 0,
-        Parent           = card,
-    })
-    corner(barBg, 2)
-    local bar = new("Frame", {
-        Size             = UDim2.new(1, 0, 1, 0),
-        BackgroundColor3 = accentCol,
-        BorderSizePixel  = 0,
-        Parent           = barBg,
-    })
-    corner(bar, 2)
-    tw(bar, TweenInfo.new(duration, Enum.EasingStyle.Linear), { Size = UDim2.new(0, 0, 1, 0) })
-
-    -- animate in
+    -- slide-in from right
+    card.Position = UDim2.new(0, 40, 0, 0)
     card.BackgroundTransparency = 1
+    accentBar.BackgroundTransparency = 1
     titleLbl.TextTransparency   = 1
     bodyLbl.TextTransparency    = 1
-    tw(card,     TI, { BackgroundTransparency = 0 })
-    tw(titleLbl, TI, { TextTransparency = 0 })
-    tw(bodyLbl,  TI, { TextTransparency = 0 })
+    tw(card,      TI, { BackgroundTransparency = 0, Position = UDim2.new(0,0,0,0) })
+    tw(accentBar, TI, { BackgroundTransparency = 0 })
+    tw(titleLbl,  TI, { TextTransparency = 0 })
+    tw(bodyLbl,   TI, { TextTransparency = 0 })
 
     -- dismiss on click
     local btn = new("TextButton", {
-        Size                  = UDim2.new(1,0,1,0),
+        Size                   = UDim2.new(1,0,1,0),
         BackgroundTransparency = 1,
-        Text                  = "",
-        ZIndex                = card.ZIndex + 1,
-        Parent                = card,
+        Text                   = "",
+        ZIndex                 = card.ZIndex + 2,
+        Parent                 = card,
     })
 
     local function dismiss()
-        tw(card,     TI, { BackgroundTransparency = 1 })
-        tw(titleLbl, TI, { TextTransparency = 1 })
-        tw(bodyLbl,  TI, { TextTransparency = 1 })
+        tw(card,      TI, { BackgroundTransparency = 1, Position = UDim2.new(0,40,0,0) })
+        tw(accentBar, TI, { BackgroundTransparency = 1 })
+        tw(titleLbl,  TI, { TextTransparency = 1 })
+        tw(bodyLbl,   TI, { TextTransparency = 1 })
         task.wait(0.25)
         pcall(function() card:Destroy() end)
     end
@@ -787,102 +751,130 @@ function Library:Window(opts)
             Name             = "Window",
             AnchorPoint      = Vector2.new(0.5, 0.5),
             Position         = UDim2.new(0.5, 0, 0.5, 0),
-            Size             = UDim2.new(0, 580, 0, 390),
+            Size             = UDim2.new(0, 720, 0, 460),
             BackgroundColor3 = theme.Background,
             ClipsDescendants = true,
             Parent           = ScreenGui,
         })
-        corner(Root, 14); stroke(Root, theme.Border, 1, 0.88)
+        corner(Root, 10); stroke(Root, theme.Border, 1, 0.92)
         Win.Root = Root
 
+        -- subtle top-left cyan glow
         new("UIGradient", {
             Color = ColorSequence.new{
                 ColorSequenceKeypoint.new(0, theme.Primary),
                 ColorSequenceKeypoint.new(1, theme.Background),
             },
             Transparency = NumberSequence.new{
-                NumberSequenceKeypoint.new(0, 0.85),
-                NumberSequenceKeypoint.new(0.6, 1),
+                NumberSequenceKeypoint.new(0,   0.92),
+                NumberSequenceKeypoint.new(0.5, 1),
                 NumberSequenceKeypoint.new(1,   1),
             },
-            Rotation = 90,
+            Rotation = 135,
             Parent = Root,
         })
 
-        -- Header
+        -- (No top header bar — title goes inside the sidebar.)
+        -- Invisible drag handle across the top edge.
         local Header = new("Frame", {
-            Size             = UDim2.new(1, 0, 0, 42),
-            BackgroundColor3 = theme.Surface,
+            Size             = UDim2.new(1, 0, 0, 40),
+            BackgroundTransparency = 1,
             BorderSizePixel  = 0,
+            ZIndex           = 50,
             Parent           = Root,
         })
-        new("Frame", {
-            Position = UDim2.new(0,0,1,-1), Size = UDim2.new(1,0,0,1),
-            BackgroundColor3 = theme.Border, BackgroundTransparency = 0.88,
-            BorderSizePixel = 0, Parent = Header,
-        })
-        local titleLbl = new("TextLabel", {
-            BackgroundTransparency = 1,
-            Position  = UDim2.new(0,14,0,0), Size = UDim2.new(1,-120,1,0),
-            Font      = FONT_BOLD, TextSize = 14,
-            TextColor3 = theme.Foreground, Text = opts.Title or "CyanUI",
-            TextXAlignment = Enum.TextXAlignment.Left,
-            Parent = Header,
-        })
+        makeDraggable(Header, Root)
 
+        -- Close / minimise chips (top-right corner of the window)
         local function ctrlBtn(icon, xOff, hoverCol)
             local b = new("TextButton", {
                 Size = UDim2.new(0,22,0,22),
-                Position = UDim2.new(1, xOff, 0.5, -11),
+                Position = UDim2.new(1, xOff, 0, 12),
                 BackgroundColor3 = theme.SurfaceElevated,
-                Text = icon, Font = FONT_BOLD, TextSize = 13,
-                TextColor3 = theme.Foreground, AutoButtonColor = false,
-                Parent = Header,
+                BackgroundTransparency = 1,
+                Text = icon, Font = FONT_MED, TextSize = 14,
+                TextColor3 = theme.MutedForeground, AutoButtonColor = false,
+                ZIndex = 60,
+                Parent = Root,
             })
             corner(b, 6)
-            b.MouseEnter:Connect(function() tw(b, TI_Q, { BackgroundColor3 = hoverCol }) end)
-            b.MouseLeave:Connect(function() tw(b, TI_Q, { BackgroundColor3 = theme.SurfaceElevated }) end)
+            b.MouseEnter:Connect(function()
+                tw(b, TI_Q, { BackgroundTransparency = 0, TextColor3 = hoverCol })
+            end)
+            b.MouseLeave:Connect(function()
+                tw(b, TI_Q, { BackgroundTransparency = 1, TextColor3 = theme.MutedForeground })
+            end)
             return b
         end
         local closeBtn = ctrlBtn("×", -32, theme.Destructive)
-        local minBtn   = ctrlBtn("–", -62, theme.Primary)
+        local minBtn   = ctrlBtn("–", -62, theme.Foreground)
 
-        makeDraggable(Header, Root)
+        -- placeholder titleLbl reference (real title lives in sidebar, set below)
+        local titleLbl
 
-        -- Sidebar
+        -- Sidebar (full-height, with title at top, hint at bottom)
         local Sidebar = new("Frame", {
-            Position = UDim2.new(0,0,0,42), Size = UDim2.new(0,155,1,-42),
+            Position = UDim2.new(0,0,0,0), Size = UDim2.new(0,200,1,0),
             BackgroundColor3 = theme.Sidebar, BorderSizePixel = 0, Parent = Root,
         })
         new("Frame", {
             Position = UDim2.new(1,-1,0,0), Size = UDim2.new(0,1,1,0),
-            BackgroundColor3 = theme.Border, BackgroundTransparency = 0.88,
+            BackgroundColor3 = theme.Border, BackgroundTransparency = 0.92,
             BorderSizePixel = 0, Parent = Sidebar,
         })
+
+        -- Sidebar title row: "AppName · Title"   v1.0.0
+        local sideHeader = new("Frame", {
+            Position = UDim2.new(0,0,0,0), Size = UDim2.new(1,0,0,58),
+            BackgroundTransparency = 1, Parent = Sidebar,
+        })
+        titleLbl = new("TextLabel", {
+            BackgroundTransparency = 1,
+            Position  = UDim2.new(0,18,0,20), Size = UDim2.new(1,-36,0,18),
+            Font      = FONT_MED, TextSize = 13,
+            TextColor3 = theme.Foreground,
+            Text = opts.Title or "CyanUI",
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Parent = sideHeader,
+        })
+        if opts.Version then
+            new("TextLabel", {
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0,18,0,38), Size = UDim2.new(1,-36,0,14),
+                Font = FONT_REG, TextSize = 11,
+                TextColor3 = theme.MutedForeground,
+                Text = opts.Version, TextXAlignment = Enum.TextXAlignment.Left,
+                Parent = sideHeader,
+            })
+        end
+
+        -- Footer hint
+        new("TextLabel", {
+            AnchorPoint = Vector2.new(0,1),
+            Position = UDim2.new(0,18,1,-16), Size = UDim2.new(1,-36,0,14),
+            BackgroundTransparency = 1,
+            Font = FONT_REG, TextSize = 11,
+            TextColor3 = theme.MutedForeground,
+            Text = opts.FooterHint or "Right Ctrl · toggle",
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Parent = Sidebar,
+        })
+
         local SideScroll = new("ScrollingFrame", {
-            Size = UDim2.new(1,0,1,0), BackgroundTransparency = 1,
-            BorderSizePixel = 0, ScrollBarThickness = 2,
+            Position = UDim2.new(0,0,0,68),
+            Size = UDim2.new(1,0,1,-100),
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0, ScrollBarThickness = 0,
             ScrollBarImageColor3 = theme.Primary,
             CanvasSize = UDim2.new(0,0,0,0),
             AutomaticCanvasSize = Enum.AutomaticSize.Y,
             Parent = Sidebar,
         })
-        listL(SideScroll, 4); pad(SideScroll, 8)
-
-        -- Scroll fade overlay on sidebar
-        new("UIGradient", {
-            Transparency = NumberSequence.new{
-                NumberSequenceKeypoint.new(0,   0),
-                NumberSequenceKeypoint.new(0.92,0),
-                NumberSequenceKeypoint.new(1,   1),
-            },
-            Rotation = 90,
-            Parent   = SideScroll,
-        })
+        listL(SideScroll, 2); pad(SideScroll, nil, 10, 10, 0, 0)
 
         -- Pages
         local Pages = new("Frame", {
-            Position = UDim2.new(0,155,0,42), Size = UDim2.new(1,-155,1,-42),
+            Position = UDim2.new(0,200,0,0), Size = UDim2.new(1,-200,1,0),
             BackgroundTransparency = 1, Parent = Root,
         })
 
@@ -898,7 +890,7 @@ function Library:Window(opts)
         local minimized = false
         minBtn.MouseButton1Click:Connect(function()
             minimized = not minimized
-            tw(Root, TI, { Size = minimized and UDim2.new(0,580,0,42) or UDim2.new(0,580,0,390) })
+            tw(Root, TI, { Size = minimized and UDim2.new(0,200,0,58) or UDim2.new(0,720,0,460) })
         end)
         closeBtn.MouseButton1Click:Connect(function()
             Root.Visible = false; OpenIcon.Visible = true
@@ -919,17 +911,15 @@ function Library:Window(opts)
         table.insert(Win._connections, rcConn)
 
         -- intro anim
-        Root.Size = UDim2.new(0,480,0,320)
+        Root.Size = UDim2.new(0,640,0,400)
         Root.BackgroundTransparency = 1
-        tw(Root, TI, { Size = UDim2.new(0,580,0,390), BackgroundTransparency = 0 })
+        tw(Root, TI, { Size = UDim2.new(0,720,0,460), BackgroundTransparency = 0 })
 
         -- Theme listener
         Win._themeUnreg = Library:OnThemeChanged(function(t)
-            -- update root colours
             tw(Root,    TI, { BackgroundColor3 = t.Background })
-            tw(Header,  TI, { BackgroundColor3 = t.Surface })
             tw(Sidebar, TI, { BackgroundColor3 = t.Sidebar })
-            titleLbl.TextColor3 = t.Foreground
+            if titleLbl then titleLbl.TextColor3 = t.Foreground end
         end)
 
         -- ================================================================
@@ -958,17 +948,38 @@ function Library:Window(opts)
             local Tab = { _win = self }
 
             local TabBtn = new("TextButton", {
-                Size = UDim2.new(1,0,0,32),
-                BackgroundColor3 = theme.Sidebar,
+                Size = UDim2.new(1,0,0,36),
+                BackgroundColor3 = theme.SurfaceElevated,
                 BackgroundTransparency = 1,
-                Text = "  " .. (name or "Tab"),
+                Text = "    " .. (name or "Tab"),
                 TextXAlignment = Enum.TextXAlignment.Left,
                 Font = FONT_MED, TextSize = 13,
                 TextColor3 = theme.MutedForeground,
                 AutoButtonColor = false,
                 Parent = SideScroll,
             })
-            corner(TabBtn, 8); pad(TabBtn, nil, 10, 8, 0, 0)
+            corner(TabBtn, 6); pad(TabBtn, nil, 4, 8, 0, 0)
+            -- left accent bar, shown only when active
+            local TabBar = new("Frame", {
+                Position = UDim2.new(0,0,0.5,-8),
+                Size = UDim2.new(0,2,0,16),
+                BackgroundColor3 = theme.Primary,
+                BackgroundTransparency = 1,
+                BorderSizePixel = 0,
+                Parent = TabBtn,
+            })
+            -- Hover state for inactive tabs
+            local _isActive = false
+            TabBtn.MouseEnter:Connect(function()
+                if not _isActive then
+                    tw(TabBtn, TI_Q, { BackgroundTransparency = 0.7 })
+                end
+            end)
+            TabBtn.MouseLeave:Connect(function()
+                if not _isActive then
+                    tw(TabBtn, TI_Q, { BackgroundTransparency = 1 })
+                end
+            end)
 
             local Page = new("ScrollingFrame", {
                 Size = UDim2.new(1,0,1,0), BackgroundTransparency = 1,
@@ -979,7 +990,7 @@ function Library:Window(opts)
                 AutomaticCanvasSize = Enum.AutomaticSize.Y,
                 Parent = Pages,
             })
-            listL(Page, 8); pad(Page, 14)
+            listL(Page, 10); pad(Page, nil, 28, 28, 24, 24)
 
             -- scroll fade
             new("UIGradient", {
@@ -994,21 +1005,29 @@ function Library:Window(opts)
 
             Tab._page = Page
             Tab._btn  = TabBtn
+            Tab._bar  = TabBar
 
             local function activate()
                 for _, t in ipairs(self.Tabs) do
                     t._page.Visible = false
+                    t._isActive = false
                     tw(t._btn, TI_Q, {
                         BackgroundTransparency = 1,
                         TextColor3 = theme.MutedForeground,
                     })
+                    if t._bar then
+                        tw(t._bar, TI_Q, { BackgroundTransparency = 1 })
+                    end
                 end
                 Page.Visible = true
+                _isActive = true
+                Tab._isActive = true
                 tw(TabBtn, TI_Q, {
                     BackgroundColor3 = theme.SurfaceElevated,
                     BackgroundTransparency = 0,
                     TextColor3 = theme.Foreground,
                 })
+                tw(TabBar, TI_Q, { BackgroundTransparency = 0 })
             end
             TabBtn.MouseButton1Click:Connect(activate)
             table.insert(self.Tabs, Tab)
@@ -1019,11 +1038,12 @@ function Library:Window(opts)
             -- ============================================================
             local function card(height)
                 local f = new("Frame", {
-                    Size = UDim2.new(1,0,0,height or 38),
+                    Size = UDim2.new(1,0,0,height or 52),
                     BackgroundColor3 = theme.Card,
+                    BorderSizePixel  = 0,
                     Parent = Page,
                 })
-                corner(f, 8); stroke(f, theme.Border, 1, 0.90)
+                corner(f, 8); stroke(f, theme.Border, 1, 0.94)
                 return f
             end
 
@@ -1082,28 +1102,19 @@ function Library:Window(opts)
             function Tab:Section(name)
                 local container = new("Frame", {
                     BackgroundTransparency = 1,
-                    Size = UDim2.new(1,0,0,22),
+                    Size = UDim2.new(1,0,0,24),
                     Parent = Page,
-                })
-                new("Frame", {
-                    AnchorPoint = Vector2.new(0,0.5), Position = UDim2.new(0,0,0.5,0),
-                    Size = UDim2.new(0.3,0,0,1), BackgroundColor3 = theme.Primary,
-                    BackgroundTransparency = 0.7, BorderSizePixel = 0, Parent = container,
                 })
                 local lbl = new("TextLabel", {
                     BackgroundTransparency = 1,
                     Size = UDim2.new(1,0,1,0),
-                    Font = FONT_BOLD, TextSize = 11,
+                    Font = FONT_MED, TextSize = 11,
                     TextColor3 = theme.Primary,
                     TextXAlignment = Enum.TextXAlignment.Left,
                     Text = string.upper(name or "Section"),
                     Parent = container,
                 })
-                new("Frame", {
-                    AnchorPoint = Vector2.new(1,0.5), Position = UDim2.new(1,0,0.5,0),
-                    Size = UDim2.new(0.3,0,0,1), BackgroundColor3 = theme.Primary,
-                    BackgroundTransparency = 0.7, BorderSizePixel = 0, Parent = container,
-                })
+                -- subtle letter spacing via leading char
                 return {
                     Set    = function(_, t) lbl.Text = string.upper(t) end,
                     Remove = function()    container:Destroy() end,
@@ -1117,30 +1128,52 @@ function Library:Window(opts)
             --- @return ButtonElement
             function Tab:Button(opts)
                 opts = opts or {}
-                local f  = card(40)
+                local f  = card(52)
                 local lbl = new("TextLabel", {
                     BackgroundTransparency = 1,
-                    Size = UDim2.new(1,-12,0,18),
-                    Position = UDim2.new(0,12,0,opts.Description and 5 or 0),
+                    Size = UDim2.new(1,-60,0,18),
+                    Position = UDim2.new(0,16,0,opts.Description and 8 or 0),
+                    AnchorPoint = Vector2.new(0, opts.Description and 0 or 0.5),
                     Font = FONT_MED, TextSize = 13,
                     TextColor3 = theme.Foreground,
                     TextXAlignment = Enum.TextXAlignment.Left,
                     Text = opts.Label or "Button",
                     Parent = f,
                 })
+                if not opts.Description then
+                    lbl.Position = UDim2.new(0,16,0.5,0)
+                end
                 if opts.Description then
                     new("TextLabel", {
                         BackgroundTransparency = 1,
-                        Size = UDim2.new(1,-12,0,14),
-                        Position = UDim2.new(0,12,0,22),
+                        Size = UDim2.new(1,-60,0,14),
+                        Position = UDim2.new(0,16,0,28),
                         Font = FONT_REG, TextSize = 11,
                         TextColor3 = theme.MutedForeground,
                         TextXAlignment = Enum.TextXAlignment.Left,
                         Text = opts.Description,
                         Parent = f,
                     })
-                    f.Size = UDim2.new(1,0,0,46)
                 end
+
+                -- right-side play chip
+                local chip = new("Frame", {
+                    AnchorPoint = Vector2.new(1, 0.5),
+                    Position    = UDim2.new(1, -10, 0.5, 0),
+                    Size        = UDim2.new(0, 32, 0, 26),
+                    BackgroundColor3 = theme.SurfaceElevated,
+                    BorderSizePixel  = 0,
+                    Parent = f,
+                })
+                corner(chip, 6)
+                new("TextLabel", {
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(1,0,1,0),
+                    Font = FONT_BOLD, TextSize = 13,
+                    TextColor3 = theme.Primary,
+                    Text = "▸",
+                    Parent = chip,
+                })
 
                 local clicked = Signal.new()
                 local hover   = Signal.new()
@@ -1150,16 +1183,20 @@ function Library:Window(opts)
                     Text = "", Parent = f,
                 })
                 btn.MouseEnter:Connect(function()
-                    tw(f, TI_Q, { BackgroundColor3 = theme.SurfaceElevated })
+                    tw(f,    TI_Q, { BackgroundColor3 = theme.CardHover or theme.SurfaceElevated })
+                    tw(chip, TI_Q, { BackgroundColor3 = theme.Primary })
                     hover:Fire(true)
                 end)
                 btn.MouseLeave:Connect(function()
-                    tw(f, TI_Q, { BackgroundColor3 = theme.Card })
+                    tw(f,    TI_Q, { BackgroundColor3 = theme.Card })
+                    tw(chip, TI_Q, { BackgroundColor3 = theme.SurfaceElevated })
                     hover:Fire(false)
                 end)
                 btn.MouseButton1Click:Connect(function()
-                    tw(f, TI_Q, { BackgroundColor3 = theme.Primary })
-                    task.delay(0.12, function() tw(f, TI_Q, { BackgroundColor3 = theme.Card }) end)
+                    tw(chip, TI_Q, { BackgroundColor3 = theme.PrimaryGlow })
+                    task.delay(0.15, function()
+                        tw(chip, TI_Q, { BackgroundColor3 = theme.SurfaceElevated })
+                    end)
                     clicked:Fire()
                 end)
 
@@ -1218,11 +1255,11 @@ function Library:Window(opts)
                 opts = opts or {}
                 local f = card(56)
                 f.AutomaticSize = Enum.AutomaticSize.Y
-                pad(f, 10); listL(f, 4)
+                pad(f, nil, 16, 16, 14, 14); listL(f, 6)
                 local title = new("TextLabel", {
                     BackgroundTransparency = 1,
                     Size = UDim2.new(1,0,0,18),
-                    Font = FONT_BOLD, TextSize = 13,
+                    Font = FONT_MED, TextSize = 13,
                     TextColor3 = theme.Foreground,
                     TextXAlignment = Enum.TextXAlignment.Left,
                     Text = opts.Title or "Title", Parent = f,
@@ -1267,21 +1304,25 @@ function Library:Window(opts)
             function Tab:Toggle(opts)
                 opts  = opts or {}
                 local state = opts.Default or false
-                local f     = card(opts.Description and 46 or 40)
+                local f     = card(opts.Description and 56 or 52)
                 local lbl = new("TextLabel", {
                     BackgroundTransparency = 1,
-                    Size     = UDim2.new(1,-60,0,18),
-                    Position = UDim2.new(0,12,0,opts.Description and 5 or 0),
+                    Size     = UDim2.new(1,-80,0,18),
+                    Position = UDim2.new(0,16,0,opts.Description and 10 or 0),
+                    AnchorPoint = Vector2.new(0, opts.Description and 0 or 0.5),
                     Font = FONT_MED, TextSize = 13,
                     TextColor3 = theme.Foreground,
                     TextXAlignment = Enum.TextXAlignment.Left,
                     Text = opts.Label or "Toggle", Parent = f,
                 })
+                if not opts.Description then
+                    lbl.Position = UDim2.new(0,16,0.5,0)
+                end
                 if opts.Description then
                     new("TextLabel", {
                         BackgroundTransparency = 1,
-                        Size = UDim2.new(1,-60,0,14),
-                        Position = UDim2.new(0,12,0,22),
+                        Size = UDim2.new(1,-80,0,14),
+                        Position = UDim2.new(0,16,0,30),
                         Font = FONT_REG, TextSize = 11,
                         TextColor3 = theme.MutedForeground,
                         TextXAlignment = Enum.TextXAlignment.Left,
@@ -1290,17 +1331,21 @@ function Library:Window(opts)
                 end
                 local track = new("Frame", {
                     AnchorPoint = Vector2.new(1,0.5),
-                    Position    = UDim2.new(1,-10,0.5,0),
-                    Size        = UDim2.new(0,40,0,22),
+                    Position    = UDim2.new(1,-14,0.5,0),
+                    Size        = UDim2.new(0,44,0,22),
                     BackgroundColor3 = theme.SurfaceElevated,
+                    BorderSizePixel  = 0,
                     Parent = f,
                 })
                 corner(track, 11)
                 local knob = new("Frame", {
-                    Position = UDim2.new(0,2,0.5,-9), Size = UDim2.new(0,18,0,18),
-                    BackgroundColor3 = theme.Foreground, Parent = track,
+                    Position = UDim2.new(0,3,0.5,-8),
+                    Size = UDim2.new(0,16,0,16),
+                    BackgroundColor3 = Color3.fromRGB(255,255,255),
+                    BorderSizePixel  = 0,
+                    Parent = track,
                 })
-                corner(knob, 9)
+                corner(knob, 8)
 
                 local changed = Signal.new()
                 local api     = {}
@@ -1310,10 +1355,10 @@ function Library:Window(opts)
                 local function render()
                     if state then
                         tw(track, TI_Q, { BackgroundColor3 = theme.Primary })
-                        tw(knob,  TI_Q, { Position = UDim2.new(1,-20,0.5,-9) })
+                        tw(knob,  TI_Q, { Position = UDim2.new(1,-19,0.5,-8) })
                     else
                         tw(track, TI_Q, { BackgroundColor3 = theme.SurfaceElevated })
-                        tw(knob,  TI_Q, { Position = UDim2.new(0,2,0.5,-9) })
+                        tw(knob,  TI_Q, { Position = UDim2.new(0,3,0.5,-8) })
                     end
                 end
                 render()
@@ -1353,11 +1398,11 @@ function Library:Window(opts)
                 local inc    = opts.Increment or 1
                 local suffix = opts.Suffix or ""
                 local val    = opts.Default or min
-                local f      = card(54)
+                local f      = card(62)
 
                 new("TextLabel", {
                     BackgroundTransparency = 1,
-                    Position = UDim2.new(0,12,0,6), Size = UDim2.new(1,-24,0,18),
+                    Position = UDim2.new(0,16,0,12), Size = UDim2.new(1,-100,0,16),
                     Font = FONT_MED, TextSize = 13,
                     TextColor3 = theme.Foreground,
                     TextXAlignment = Enum.TextXAlignment.Left,
@@ -1365,33 +1410,35 @@ function Library:Window(opts)
                 })
                 local valLbl = new("TextLabel", {
                     BackgroundTransparency = 1,
-                    Position = UDim2.new(1,-80,0,6), Size = UDim2.new(0,68,0,18),
+                    Position = UDim2.new(1,-80,0,12), Size = UDim2.new(0,68,0,16),
                     Font = FONT_MED, TextSize = 12,
                     TextColor3 = theme.Primary,
                     TextXAlignment = Enum.TextXAlignment.Right,
                     Text = tostring(val)..suffix, Parent = f,
                 })
                 local track = new("Frame", {
-                    Position = UDim2.new(0,12,1,-18), Size = UDim2.new(1,-24,0,6),
+                    Position = UDim2.new(0,16,1,-22), Size = UDim2.new(1,-32,0,4),
                     BackgroundColor3 = theme.SurfaceElevated,
                     BorderSizePixel  = 0, Parent = f,
                 })
-                corner(track, 3)
+                corner(track, 2)
                 local fill = new("Frame", {
                     Size = UDim2.new((val-min)/(max-min),0,1,0),
                     BackgroundColor3 = theme.Primary,
                     BorderSizePixel = 0, Parent = track,
                 })
-                corner(fill, 3)
-                -- thumb dot
+                corner(fill, 2)
+                -- white knob
                 local thumb = new("Frame", {
                     AnchorPoint = Vector2.new(0.5,0.5),
                     Position    = UDim2.new((val-min)/(max-min),0,0.5,0),
-                    Size        = UDim2.new(0,12,0,12),
-                    BackgroundColor3 = theme.Primary,
+                    Size        = UDim2.new(0,14,0,14),
+                    BackgroundColor3 = Color3.fromRGB(255,255,255),
+                    BorderSizePixel  = 0,
                     Parent = track, ZIndex = track.ZIndex + 1,
                 })
-                corner(thumb, 6)
+                corner(thumb, 7)
+                stroke(thumb, Color3.fromRGB(0,0,0), 1, 0.85)
 
                 local changed = Signal.new()
                 local api     = {}
@@ -1455,23 +1502,24 @@ function Library:Window(opts)
             -- ============================================================
             function Tab:Input(opts)
                 opts = opts or {}
-                local f = card(58)
+                local f = card(66)
                 new("TextLabel", {
                     BackgroundTransparency = 1,
-                    Position = UDim2.new(0,12,0,6), Size = UDim2.new(1,-24,0,16),
-                    Font = FONT_MED, TextSize = 13, TextColor3 = theme.Foreground,
+                    Position = UDim2.new(0,16,0,10), Size = UDim2.new(1,-32,0,14),
+                    Font = FONT_REG, TextSize = 11, TextColor3 = theme.MutedForeground,
                     TextXAlignment = Enum.TextXAlignment.Left,
                     Text = opts.Label or "Input", Parent = f,
                 })
                 local box = new("TextBox", {
-                    Position = UDim2.new(0,12,0,26), Size = UDim2.new(1,-24,0,26),
-                    BackgroundColor3 = theme.SurfaceElevated,
+                    Position = UDim2.new(0,16,0,28), Size = UDim2.new(1,-32,0,28),
+                    BackgroundColor3 = theme.Background,
                     Font = FONT_REG, TextSize = 13, TextColor3 = theme.Foreground,
                     PlaceholderText = opts.Placeholder or "…",
                     PlaceholderColor3 = theme.MutedForeground,
-                    ClearTextOnFocus = false, Text = opts.Default or "", Parent = f,
+                    ClearTextOnFocus = false, Text = opts.Default or "",
+                    BorderSizePixel = 0, Parent = f,
                 })
-                corner(box, 6); pad(box, nil, 8, 8, 0, 0); stroke(box, theme.Border, 1, 0.9)
+                corner(box, 6); pad(box, nil, 10, 10, 0, 0); stroke(box, theme.Border, 1, 0.94)
 
                 local changed = Signal.new()
                 local api     = {}
@@ -1504,25 +1552,25 @@ function Library:Window(opts)
             function Tab:Keybind(opts)
                 opts = opts or {}
                 local current = opts.Default or "None"
-                local f       = card(40)
+                local f       = card(52)
                 new("TextLabel", {
                     BackgroundTransparency = 1,
-                    Position = UDim2.new(0,12,0,0), Size = UDim2.new(1,-90,1,0),
+                    Position = UDim2.new(0,16,0,0), Size = UDim2.new(1,-90,1,0),
                     Font = FONT_MED, TextSize = 13, TextColor3 = theme.Foreground,
                     TextXAlignment = Enum.TextXAlignment.Left,
                     Text = opts.Label or "Keybind", Parent = f,
                 })
                 local kbBtn = new("TextButton", {
                     AnchorPoint = Vector2.new(1,0.5),
-                    Position    = UDim2.new(1,-10,0.5,0),
-                    Size        = UDim2.new(0,80,0,26),
+                    Position    = UDim2.new(1,-14,0.5,0),
+                    Size        = UDim2.new(0,44,0,24),
                     BackgroundColor3 = theme.SurfaceElevated,
                     TextColor3 = theme.Foreground,
                     Font = FONT_MED, TextSize = 12,
                     Text = tostring(current), AutoButtonColor = false,
-                    Parent = f,
+                    BorderSizePixel = 0, Parent = f,
                 })
-                corner(kbBtn, 6); stroke(kbBtn, theme.Border, 1, 0.9)
+                corner(kbBtn, 6); stroke(kbBtn, theme.Border, 1, 0.94)
 
                 local pressed  = Signal.new()
                 local api      = {}
@@ -1567,29 +1615,43 @@ function Library:Window(opts)
                 local multi   = opts.Multi or false
                 local options = opts.Options or {}
                 local current = opts.Default or (multi and {} or options[1])
-                local f       = card(40)
+                local f       = card(52)
                 f.ClipsDescendants = true
 
                 new("TextLabel", {
                     BackgroundTransparency = 1,
-                    Position = UDim2.new(0,12,0,0), Size = UDim2.new(1,-150,0,40),
+                    Position = UDim2.new(0,16,0,0), Size = UDim2.new(1,-180,0,52),
                     Font = FONT_MED, TextSize = 13, TextColor3 = theme.Foreground,
                     TextXAlignment = Enum.TextXAlignment.Left,
                     Text = opts.Label or "Dropdown", Parent = f,
                 })
                 local valBtn = new("TextButton", {
-                    AnchorPoint = Vector2.new(1,0),
-                    Position    = UDim2.new(1,-10,0,8),
-                    Size        = UDim2.new(0,130,0,24),
+                    AnchorPoint = Vector2.new(1,0.5),
+                    Position    = UDim2.new(1,-14,0,26),
+                    Size        = UDim2.new(0,160,0,26),
                     BackgroundColor3 = theme.SurfaceElevated,
                     Font = FONT_MED, TextSize = 12, TextColor3 = theme.Foreground,
-                    AutoButtonColor = false, Parent = f,
+                    AutoButtonColor = false,
+                    BorderSizePixel = 0, Parent = f,
                 })
-                corner(valBtn, 6); stroke(valBtn, theme.Border, 1, 0.9)
+                corner(valBtn, 6); stroke(valBtn, theme.Border, 1, 0.94)
+                pad(valBtn, nil, 10, 22, 0, 0)
+                valBtn.TextXAlignment = Enum.TextXAlignment.Right
+                -- chevron
+                new("TextLabel", {
+                    AnchorPoint = Vector2.new(1, 0.5),
+                    Position = UDim2.new(1, -8, 0.5, 0),
+                    Size = UDim2.new(0, 12, 0, 12),
+                    BackgroundTransparency = 1,
+                    Font = FONT_MED, TextSize = 12,
+                    TextColor3 = theme.MutedForeground,
+                    Text = "▾",
+                    Parent = valBtn,
+                })
 
                 -- search box
                 local searchBox = new("TextBox", {
-                    Position = UDim2.new(0,12,0,44), Size = UDim2.new(1,-24,0,24),
+                    Position = UDim2.new(0,16,0,56), Size = UDim2.new(1,-32,0,24),
                     BackgroundColor3 = theme.SurfaceElevated,
                     Font = FONT_REG, TextSize = 12, TextColor3 = theme.Foreground,
                     PlaceholderText = "Search…", PlaceholderColor3 = theme.MutedForeground,
@@ -1600,7 +1662,7 @@ function Library:Window(opts)
                 corner(searchBox, 6); pad(searchBox, nil, 8, 8, 0, 0)
 
                 local list = new("Frame", {
-                    Position = UDim2.new(0,12,0,72), Size = UDim2.new(1,-24,0,0),
+                    Position = UDim2.new(0,16,0,84), Size = UDim2.new(1,-32,0,0),
                     BackgroundColor3 = theme.SurfaceElevated,
                     BorderSizePixel = 0, ClipsDescendants = true, Parent = f,
                 })
@@ -1623,8 +1685,8 @@ function Library:Window(opts)
                 local opened = false
                 local function close()
                     opened = false
-                    tw(f,    TI_Q, { Size = UDim2.new(1,0,0,40) })
-                    tw(list, TI_Q, { Size = UDim2.new(1,-24,0,0) })
+                    tw(f,    TI_Q, { Size = UDim2.new(1,0,0,52) })
+                    tw(list, TI_Q, { Size = UDim2.new(1,-32,0,0) })
                     tw(searchBox, TI_Q, { BackgroundTransparency = 1 })
                     searchBox.Text = ""
                 end
@@ -1669,7 +1731,7 @@ function Library:Window(opts)
                                     current = opt; close()
                                 end
                                 api.Value  = current
-                                valBtn.Text = labelText().."  ▾"
+                                valBtn.Text = labelText()
                                 changed:Fire(current)
                                 Win._debouncedSave()
                             end)
@@ -1678,15 +1740,15 @@ function Library:Window(opts)
                     return visible
                 end
                 rebuild()
-                valBtn.Text = labelText().."  ▾"
+                valBtn.Text = labelText()
 
                 valBtn.MouseButton1Click:Connect(function()
                     opened = not opened
                     if opened then
                         local count  = rebuild(searchBox.Text)
                         local listH  = math.min(count * 26 + 8, 160)
-                        tw(f,    TI_Q, { Size = UDim2.new(1,0,0,78+listH) })
-                        tw(list, TI_Q, { Size = UDim2.new(1,-24,0,listH) })
+                        tw(f,    TI_Q, { Size = UDim2.new(1,0,0,90+listH) })
+                        tw(list, TI_Q, { Size = UDim2.new(1,-32,0,listH) })
                         tw(searchBox, TI_Q, { BackgroundTransparency = 0 })
                     else close() end
                 end)
@@ -1695,20 +1757,20 @@ function Library:Window(opts)
                     if not opened then return end
                     local count = rebuild(searchBox.Text)
                     local listH = math.min(count * 26 + 8, 160)
-                    list.Size   = UDim2.new(1,-24,0,listH)
-                    f.Size      = UDim2.new(1,0,0,78+listH)
+                    list.Size   = UDim2.new(1,-32,0,listH)
+                    f.Size      = UDim2.new(1,0,0,90+listH)
                 end)
 
                 function api:Set(v)
                     current    = v
                     api.Value  = v
-                    valBtn.Text = labelText().."  ▾"
+                    valBtn.Text = labelText()
                 end
                 function api:Refresh(newOpts, keep)
                     options   = newOpts or {}
                     if not keep then current = multi and {} or options[1] end
                     api.Value  = current
-                    valBtn.Text = labelText().."  ▾"
+                    valBtn.Text = labelText()
                     rebuild()
                 end
                 function api:OnChanged(fn) return changed:Connect(safeCallback(fn, notifyFn)) end
