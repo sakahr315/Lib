@@ -1340,7 +1340,7 @@ function Library:Window(opts)
                 --- @param text string
                 function api:SetLabel(text)  lbl.Text = text end
                 function api:Remove()        f:Destroy() end
-                return decorate(api, f, opts)
+                return api
             end
 
             -- ============================================================
@@ -1501,7 +1501,7 @@ function Library:Window(opts)
                 if Win._pendingConfig and opts.Flag and Win._pendingConfig[opts.Flag] ~= nil then
                     api:Set(Win._pendingConfig[opts.Flag])
                 end
-                return decorate(api, f, opts)
+                return api
             end
 
             -- ============================================================
@@ -1611,7 +1611,7 @@ function Library:Window(opts)
                 if Win._pendingConfig and opts.Flag and Win._pendingConfig[opts.Flag] ~= nil then
                     api:Set(Win._pendingConfig[opts.Flag])
                 end
-                return decorate(api, f, opts)
+                return api
             end
 
             -- ============================================================
@@ -1660,7 +1660,7 @@ function Library:Window(opts)
                 if Win._pendingConfig and opts.Flag and Win._pendingConfig[opts.Flag] ~= nil then
                     api:Set(Win._pendingConfig[opts.Flag])
                 end
-                return decorate(api, f, opts)
+                return api
             end
 
             -- ============================================================
@@ -1721,7 +1721,7 @@ function Library:Window(opts)
                 function api:OnPressed(fn) return pressed:Connect(safeCallback(fn, notifyFn)) end
 
                 if opts.Flag then Library.Flags[opts.Flag] = api end
-                return decorate(api, f, opts)
+                return api
             end
 
             -- ============================================================
@@ -1896,7 +1896,7 @@ function Library:Window(opts)
                 if Win._pendingConfig and opts.Flag and Win._pendingConfig[opts.Flag] ~= nil then
                     api:Set(Win._pendingConfig[opts.Flag])
                 end
-                return decorate(api, f, opts)
+                return api
             end
 
             -- ============================================================
@@ -2147,7 +2147,7 @@ function Library:Window(opts)
                 function api:OnChanged(fn) return changed:Connect(safeCallback(fn, notifyFn)) end
 
                 if opts.Flag then Library.Flags[opts.Flag] = api end
-                return decorate(api, f, opts)
+                return api
             end
 
             -- ============================================================
@@ -2208,7 +2208,7 @@ function Library:Window(opts)
                 end
 
                 function api:Remove() f:Destroy() end
-                return decorate(api, f, opts)
+                return api
             end
 
             -- ============================================================
@@ -2306,7 +2306,7 @@ function Library:Window(opts)
                     rows = {}; buildRows()
                 end
                 function api:Remove() f:Destroy() end
-                return decorate(api, f, opts)
+                return api
             end
 
             return Tab
