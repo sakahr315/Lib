@@ -87,7 +87,6 @@ end
 -- =========================================================================
 local InputRouter = { _began = {}, _ended = {}, _changed = {} }
 
--- FIX #1: store router connections so they can be disconnected on cleanup
 local _routerConns = {}
 _routerConns[1] = UIS.InputBegan:Connect(function(i, g)
     for _, fn in pairs(InputRouter._began)   do pcall(fn, i, g) end
@@ -171,9 +170,9 @@ local Themes = {
 -- =========================================================================
 -- 5. RADIUS SCALE
 -- =========================================================================
-local R_SM   = 6
-local R_MD   = 10
-local R_LG   = 14
+local R_SM   = 4   -- reduced from 6
+local R_MD   = 6   -- reduced from 10
+local R_LG   = 4   -- reduced from 14 — flat window corners
 local R_PILL = 999
 
 -- =========================================================================
@@ -286,6 +285,7 @@ local function debounce(fn, delay)
     end
 end
 
+-- sheen removed from card usage — kept as utility but not called on cards
 local function sheen(parent)
     new("Frame", {
         Size                   = UDim2.new(1, -2, 0, 1),
@@ -353,7 +353,6 @@ end
 
 routerListen("_began", function(input, gp)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        -- FIX #5: close open dropdown on outside click
         if _openDropdown then
             _openDropdown()
             _openDropdown = nil
@@ -380,7 +379,6 @@ new("UIListLayout", {
     Parent              = NotifHolder,
 })
 
--- FIX #10: notification queue cap
 local _notifQueue = {}
 local NOTIF_MAX   = 5
 
@@ -416,7 +414,6 @@ local TooltipLbl = new("TextLabel", {
     Parent                 = Tooltip,
 })
 
--- FIX #3: track tooltip RenderStepped conn in module scope so it can be cleaned up
 local _tipConn
 
 local function showTooltip(text)
@@ -426,7 +423,6 @@ local function showTooltip(text)
     tw(Tooltip,    TI_Q, { BackgroundTransparency = 0 })
     tw(TooltipLbl, TI_Q, { TextTransparency = 0 })
     if _tipConn then _tipConn:Disconnect() end
-    -- FIX #19: clamp tooltip to viewport
     local function follow()
         local mp = UIS:GetMouseLocation()
         local vp = workspace.CurrentCamera.ViewportSize
@@ -500,23 +496,18 @@ local Library = {
     Flags           = {},
     Theme           = Themes.Default,
     Windows         = {},
-    -- FIX #23: expose version
     Version         = "1.2.0",
-    -- FIX #18: global text scale multiplier (1 = default, try 0.85 for small screens)
     TextScale       = 1,
     _themeListeners = {},
-    -- FIX #15: config error callback
     OnConfigError   = nil,
 }
 
--- FIX #23: version mismatch helper
 local _EXPECTED_VERSION = "1.2.0"
 if Library.Version ~= _EXPECTED_VERSION then
     warn("[MRC UI] Version mismatch: loaded " .. tostring(Library.Version)
         .. ", expected " .. _EXPECTED_VERSION)
 end
 
--- FIX #18: helper to scale text sizes
 local function ts(size)
     return math.round(size * Library.TextScale)
 end
@@ -550,7 +541,6 @@ function Library:Notify(opts)
     local icon      = NOTIF_ICONS[notifType] or "i"
     local duration  = opts.Duration or 5
 
-    -- FIX #10: enforce max queue — dismiss oldest if over cap
     if #_notifQueue >= NOTIF_MAX then
         local oldest = table.remove(_notifQueue, 1)
         if oldest and oldest.dismiss then oldest.dismiss() end
@@ -564,8 +554,8 @@ function Library:Notify(opts)
         Parent                 = NotifHolder,
     })
     corner(card, R_MD)
-    stroke(card, theme.Border, 1, 0.88)
-    sheen(card)
+    -- Notification gets a slightly more visible border than cards
+    stroke(card, theme.Border, 1, 0.82)
 
     local accentBar = new("Frame", {
         Size                   = UDim2.new(0, 3, 1, 0),
@@ -649,7 +639,6 @@ function Library:Notify(opts)
     local function dismiss()
         if dismissed then return end
         dismissed = true
-        -- remove from queue
         for i, e in ipairs(_notifQueue) do
             if e == entry then table.remove(_notifQueue, i); break end
         end
@@ -684,7 +673,6 @@ local function showLoading(theme, title, subtitle, duration)
     })
     corner(box, R_LG)
     stroke(box, theme.Border, 1, 0.88)
-    sheen(box)
 
     new("TextLabel", {
         BackgroundTransparency = 1,
@@ -760,7 +748,6 @@ local function runKeySystem(opts, onPass, notifyFn)
     })
     corner(box, R_LG)
     stroke(box, theme.Border, 1, 0.86)
-    sheen(box)
 
     new("TextLabel", {
         BackgroundTransparency = 1,
@@ -852,7 +839,6 @@ end
 local function saveConfig(window)
     local cfg = window._config
     if not (cfg and cfg.Enabled) then return end
-    -- FIX #4: guard against save after destroy
     if window._destroyed then return end
     local data = { __version = CONFIG_VERSION }
     for flag, ref in pairs(Library.Flags) do
@@ -865,7 +851,6 @@ local function saveConfig(window)
         if cfg.FolderName and not _isfolder(cfg.FolderName) then _makefolder(cfg.FolderName) end
         _writefile(cfgPath(cfg.FolderName, cfg.FileName), HttpService:JSONEncode(data))
     end)
-    -- FIX #15: surface config errors
     if not ok and Library.OnConfigError then
         pcall(Library.OnConfigError, tostring(err))
     end
@@ -892,10 +877,8 @@ function Library:Window(opts)
     local theme    = self.Theme
     local notifyFn = function(o) self:Notify(o) end
 
-    -- FIX #21: configurable size
-    local WIN_W = (opts.Size and opts.Size[1]) or 720
-    local WIN_H = (opts.Size and opts.Size[2]) or 460
-    -- FIX #22: configurable sidebar width
+    local WIN_W  = (opts.Size and opts.Size[1]) or 720
+    local WIN_H  = (opts.Size and opts.Size[2]) or 460
     local SIDE_W = opts.SidebarWidth or 180
 
     local function build()
@@ -909,9 +892,8 @@ function Library:Window(opts)
             _config       = opts.ConfigurationSaving,
             _connections  = {},
             _themeUnreg   = nil,
-            _destroyed    = false, -- FIX #4
+            _destroyed    = false,
         }
-        -- FIX #4: wrap debounce save so it no-ops after destroy
         Win._debouncedSave = debounce(function()
             if not Win._destroyed then saveConfig(Win) end
         end, 0.5)
@@ -926,23 +908,12 @@ function Library:Window(opts)
             ClipsDescendants = true,
             Parent           = ScreenGui,
         })
-        corner(Root, R_LG)
-        stroke(Root, theme.Border, 1, 0.80)
+        -- CHANGE: flat/minimal corner radius (was R_LG = 14, now 4)
+        corner(Root, 4)
+        stroke(Root, theme.Border, 1, 0.88)
         Win.Root = Root
 
-        new("UIGradient", {
-            Color = ColorSequence.new{
-                ColorSequenceKeypoint.new(0, theme.Primary),
-                ColorSequenceKeypoint.new(1, theme.Background),
-            },
-            Transparency = NumberSequence.new{
-                NumberSequenceKeypoint.new(0,   0.96),
-                NumberSequenceKeypoint.new(0.5, 1),
-                NumberSequenceKeypoint.new(1,   1),
-            },
-            Rotation = 135,
-            Parent   = Root,
-        })
+        -- REMOVED: UIGradient on Root (was present before)
 
         -- ── Header / drag handle ──────────────────────────────────────────
         local Header = new("Frame", {
@@ -964,32 +935,7 @@ function Library:Window(opts)
             Parent                 = Root,
         })
 
-        -- ── Control buttons ───────────────────────────────────────────────
-        local function ctrlBtn(icon, xOff, hoverCol)
-            local b = new("TextButton", {
-                AnchorPoint            = Vector2.new(1, 0.5),
-                Position               = UDim2.new(1, xOff, 0, 20),
-                Size                   = UDim2.new(0, 28, 0, 28),
-                BackgroundColor3       = hoverCol,
-                BackgroundTransparency = 1,
-                Text                   = icon,
-                Font                   = FONT_BOLD, TextSize = ts(16),
-                TextColor3             = theme.MutedForeground,
-                AutoButtonColor        = false,
-                ZIndex                 = 60,
-                Parent                 = Root,
-            })
-            corner(b, R_PILL)
-            b.MouseEnter:Connect(function()
-                tw(b, TI_Q, { BackgroundTransparency = 0.75, TextColor3 = Color3.fromRGB(255, 255, 255) })
-            end)
-            b.MouseLeave:Connect(function()
-                tw(b, TI_Q, { BackgroundTransparency = 1, TextColor3 = theme.MutedForeground })
-            end)
-            return b
-        end
-        local closeBtn = ctrlBtn("×", -10, theme.Destructive)
-        local minBtn   = ctrlBtn("–", -44, theme.SurfaceElevated)
+        -- REMOVED: close and minimize buttons — hidden per reference design
 
         -- ── Sidebar ───────────────────────────────────────────────────────
         local Sidebar = new("Frame", {
@@ -1014,28 +960,24 @@ function Library:Window(opts)
             BackgroundTransparency = 1,
             Parent                 = Sidebar,
         })
+
+        -- CHANGE: title format "Name · Hub" with dot separator
+        local hubName   = opts.Title or "MRC UI"
+        local hubSuffix = opts.HubName or "My Hub"
+        local titleFull = hubName .. " · " .. hubSuffix
+
         local titleLbl = new("TextLabel", {
             BackgroundTransparency = 1,
-            Position               = UDim2.new(0, 16, 0, 18),
+            Position               = UDim2.new(0, 16, 0, 20),
             Size                   = UDim2.new(1, -32, 0, 20),
-            Font                   = FONT_BOLD, TextSize = ts(14),
+            Font                   = FONT_BOLD, TextSize = ts(13),
             TextColor3             = theme.Foreground,
-            Text                   = opts.Title or "MRC UI",
+            Text                   = titleFull,
             TextXAlignment         = Enum.TextXAlignment.Left,
             Parent                 = sideHeader,
         })
-        if opts.Version then
-            new("TextLabel", {
-                BackgroundTransparency = 1,
-                Position               = UDim2.new(0, 16, 0, 38),
-                Size                   = UDim2.new(1, -32, 0, 14),
-                Font                   = FONT_REG, TextSize = ts(11),
-                TextColor3             = theme.MutedForeground,
-                Text                   = opts.Version,
-                TextXAlignment         = Enum.TextXAlignment.Left,
-                Parent                 = sideHeader,
-            })
-        end
+
+        -- REMOVED: version badge from sidebar — moved to content area top bar (below)
 
         new("TextLabel", {
             AnchorPoint            = Vector2.new(0, 1),
@@ -1054,6 +996,7 @@ function Library:Window(opts)
             Size                   = UDim2.new(1, 0, 1, -98),
             BackgroundTransparency = 1,
             BorderSizePixel        = 0,
+            -- CHANGE: hide scrollbar per reference
             ScrollBarThickness     = 0,
             ScrollBarImageColor3   = theme.Primary,
             CanvasSize             = UDim2.new(0, 0, 0, 0),
@@ -1073,7 +1016,23 @@ function Library:Window(opts)
             Parent                 = Root,
         })
 
-        -- ── Open icon ─────────────────────────────────────────────────────
+        -- ADDED: version string in top-right of content area
+        if opts.Version then
+            new("TextLabel", {
+                BackgroundTransparency = 1,
+                AnchorPoint            = Vector2.new(1, 0),
+                Position               = UDim2.new(1, -16, 0, 14),
+                Size                   = UDim2.new(0, 80, 0, 16),
+                Font                   = FONT_REG, TextSize = ts(12),
+                TextColor3             = theme.MutedForeground,
+                Text                   = opts.Version,
+                TextXAlignment         = Enum.TextXAlignment.Right,
+                ZIndex                 = 55,
+                Parent                 = Pages,
+            })
+        end
+
+        -- ── Open icon (shown when window closed) ──────────────────────────
         local OpenIcon = new("TextButton", {
             Size             = UDim2.new(0, 36, 0, 36),
             Position         = UDim2.new(0, 12, 0, 12),
@@ -1088,19 +1047,8 @@ function Library:Window(opts)
         corner(OpenIcon, R_MD)
 
         -- ── Window behaviours ─────────────────────────────────────────────
-        local minimized = false
-        minBtn.MouseButton1Click:Connect(function()
-            minimized = not minimized
-            if minimized then
-                tw(Root, TI_SLOW, { Size = UDim2.new(0, SIDE_W, 0, 60) })
-            else
-                tw(Root, TI_SLOW, { Size = UDim2.new(0, WIN_W, 0, WIN_H) })
-            end
-        end)
-        closeBtn.MouseButton1Click:Connect(function()
-            Root.Visible     = false
-            OpenIcon.Visible = true
-        end)
+        -- REMOVED: minimize and close button logic (buttons removed)
+        -- Keyboard toggle still works
         OpenIcon.MouseButton1Click:Connect(function()
             Root.Visible     = true
             OpenIcon.Visible = false
@@ -1137,15 +1085,15 @@ function Library:Window(opts)
             saveConfig(self)
             for _, unlisten in ipairs(self._connections) do unlisten() end
             if self._themeUnreg then self._themeUnreg() end
-            -- FIX #1: disconnect InputRouter global connections on destroy
             for _, c in ipairs(_routerConns) do pcall(function() c:Disconnect() end) end
             Root:Destroy()
             OpenIcon:Destroy()
         end
 
-        function Win:SetTitle(t) titleLbl.Text = t end
+        function Win:SetTitle(t)
+            titleLbl.Text = t .. " · " .. hubSuffix
+        end
 
-        -- FIX #17: ExportConfig / ImportConfig
         function Win:ExportConfig()
             if self._destroyed then return nil end
             local data = { __version = CONFIG_VERSION }
@@ -1174,16 +1122,18 @@ function Library:Window(opts)
         -- ================================================================
         -- TAB factory
         -- ================================================================
-        local function buildTab(name)
+        local function buildTab(name, tabIcon)
             local Tab = { _win = Win }
 
+            -- CHANGE: tab button — larger text, more spacing, no background by default
             local TabBtn = new("TextButton", {
-                Size                   = UDim2.new(1, 0, 0, 34),
+                Size                   = UDim2.new(1, 0, 0, 36),
                 BackgroundColor3       = theme.SurfaceElevated,
                 BackgroundTransparency = 1,
-                Text                   = name or "Tab",
+                -- CHANGE: icon support in tab label
+                Text                   = tabIcon and (tabIcon .. "  " .. (name or "Tab")) or (name or "Tab"),
                 TextXAlignment         = Enum.TextXAlignment.Left,
-                Font                   = FONT_MED, TextSize = ts(12),
+                Font                   = FONT_MED, TextSize = ts(13),
                 TextColor3             = theme.MutedForeground,
                 AutoButtonColor        = false,
                 Parent                 = SideScroll,
@@ -1192,21 +1142,26 @@ function Library:Window(opts)
             pad(TabBtn, nil, 14, 8, 0, 0)
 
             local TabBar = new("Frame", {
-                Position               = UDim2.new(0, 0, 0.5, -9),
-                Size                   = UDim2.new(0, 3, 0, 18),
+                Position               = UDim2.new(0, 0, 0.5, -10),
+                Size                   = UDim2.new(0, 3, 0, 20),
                 BackgroundColor3       = theme.Primary,
                 BackgroundTransparency = 1,
                 BorderSizePixel        = 0,
                 Parent                 = TabBtn,
             })
-            corner(TabBar, R_PILL)
 
             local _isActive = false
+
+            -- CHANGE: no hover background — only text brightening
             TabBtn.MouseEnter:Connect(function()
-                if not _isActive then tw(TabBtn, TI_Q, { BackgroundTransparency = 0.7 }) end
+                if not _isActive then
+                    tw(TabBtn, TI_Q, { TextColor3 = theme.Foreground })
+                end
             end)
             TabBtn.MouseLeave:Connect(function()
-                if not _isActive then tw(TabBtn, TI_Q, { BackgroundTransparency = 1 }) end
+                if not _isActive then
+                    tw(TabBtn, TI_Q, { TextColor3 = theme.MutedForeground })
+                end
             end)
 
             local Page = new("ScrollingFrame", {
@@ -1237,16 +1192,16 @@ function Library:Window(opts)
             Tab._btn        = TabBtn
             Tab._bar        = TabBar
             Tab._isActive   = false
-            Tab._scrollPos  = Vector2.new(0, 0) -- FIX #12: save scroll
+            Tab._scrollPos  = Vector2.new(0, 0)
 
             local function activate()
                 for _, t in ipairs(Win.Tabs) do
-                    -- FIX #12: save scroll before hiding
                     if t._isActive then
                         t._scrollPos = t._page.CanvasPosition
                     end
                     t._page.Visible = false
                     t._isActive     = false
+                    -- CHANGE: inactive tabs go back to zero background + muted text
                     tw(t._btn, TI_Q, {
                         BackgroundTransparency = 1,
                         TextColor3             = theme.MutedForeground,
@@ -1256,11 +1211,11 @@ function Library:Window(opts)
                 Page.Visible  = true
                 _isActive     = true
                 Tab._isActive = true
-                -- FIX #12: restore scroll position
                 Page.CanvasPosition = Tab._scrollPos
+                -- CHANGE: active tab gets subtle background + bright text (no border artifact)
                 tw(TabBtn, TI_Q, {
                     BackgroundColor3       = theme.SurfaceElevated,
-                    BackgroundTransparency = 0,
+                    BackgroundTransparency = 0.4,
                     TextColor3             = theme.Foreground,
                 })
                 tw(TabBar, TI_Q, { BackgroundTransparency = 0 })
@@ -1273,6 +1228,8 @@ function Library:Window(opts)
             -- ============================================================
             -- Shared element helpers
             -- ============================================================
+
+            -- CHANGE: card — reduced corner radius, nearly invisible stroke, NO sheen
             local function card(height)
                 local f = new("Frame", {
                     Size             = UDim2.new(1, 0, 0, height or 52),
@@ -1280,9 +1237,10 @@ function Library:Window(opts)
                     BorderSizePixel  = 0,
                     Parent           = Page,
                 })
-                corner(f, R_LG)
-                stroke(f, theme.Border, 1, 0.86)
-                sheen(f)
+                corner(f, 6)
+                -- CHANGE: nearly invisible border (was 0.92, now 0.97)
+                stroke(f, theme.Border, 1, 0.97)
+                -- REMOVED: sheen(f) — no highlight line on cards
                 return f
             end
 
@@ -1330,14 +1288,15 @@ function Library:Window(opts)
             function Tab:Section(name)
                 local container = new("Frame", {
                     BackgroundTransparency = 1,
-                    Size                   = UDim2.new(1, 0, 0, 26),
+                    Size                   = UDim2.new(1, 0, 0, 22),
                     Parent                 = Page,
                 })
                 local lbl = new("TextLabel", {
                     BackgroundTransparency = 1,
-                    Position               = UDim2.new(0, 2, 0, 6),
-                    Size                   = UDim2.new(1, -2, 0, 14),
-                    Font                   = FONT_MED, TextSize = ts(11),
+                    Position               = UDim2.new(0, 2, 0, 0),
+                    Size                   = UDim2.new(1, -2, 1, 0),
+                    Font                   = FONT_MED, TextSize = ts(10),
+                    -- CHANGE: section headers are now Primary (cyan) not muted grey
                     TextColor3             = theme.Primary,
                     TextXAlignment         = Enum.TextXAlignment.Left,
                     Text                   = string.upper(name or "Section"),
@@ -1356,7 +1315,6 @@ function Library:Window(opts)
                     Size                   = UDim2.new(1, 0, 0, 18),
                     Parent                 = Page,
                 })
-                -- left line
                 new("Frame", {
                     AnchorPoint            = Vector2.new(0, 0.5),
                     Position               = UDim2.new(0, 0, 0.5, 0),
@@ -1376,7 +1334,6 @@ function Library:Window(opts)
                     Text                   = text or "",
                     Parent                 = container,
                 })
-                -- right line
                 new("Frame", {
                     AnchorPoint            = Vector2.new(1, 0.5),
                     Position               = UDim2.new(1, 0, 0.5, 0),
@@ -1390,7 +1347,7 @@ function Library:Window(opts)
             end
 
             -- ============================================================
-            -- BUTTON  — FIX #20: optional Icon param
+            -- BUTTON — CHANGE: plain ▶ arrow, no chip box
             -- ============================================================
             function Tab:Button(opts2)
                 opts2 = opts2 or {}
@@ -1440,22 +1397,16 @@ function Library:Window(opts)
                     f.Size = UDim2.new(1, 0, 0, 56)
                 end
 
-                local chip = new("Frame", {
-                    AnchorPoint      = Vector2.new(1, 0.5),
-                    Position         = UDim2.new(1, -12, 0.5, 0),
-                    Size             = UDim2.new(0, 30, 0, 24),
-                    BackgroundColor3 = theme.SurfaceElevated,
-                    BorderSizePixel  = 0,
-                    Parent           = f,
-                })
-                corner(chip, R_SM)
-                new("TextLabel", {
+                -- CHANGE: plain ▶ arrow label, no chip frame, no background box
+                local arrowLbl = new("TextLabel", {
+                    AnchorPoint            = Vector2.new(1, 0.5),
+                    Position               = UDim2.new(1, -16, 0.5, 0),
+                    Size                   = UDim2.new(0, 16, 0, 16),
                     BackgroundTransparency = 1,
-                    Size                   = UDim2.new(1, 0, 1, 0),
-                    Font                   = FONT_BOLD, TextSize = ts(13),
+                    Font                   = FONT_BOLD, TextSize = ts(12),
                     TextColor3             = theme.Primary,
-                    Text                   = "▸",
-                    Parent                 = chip,
+                    Text                   = "▶",
+                    Parent                 = f,
                 })
 
                 local clicked = Signal.new()
@@ -1468,18 +1419,18 @@ function Library:Window(opts)
                     Parent                 = f,
                 })
                 btn.MouseEnter:Connect(function()
-                    tw(f,    TI_Q, { BackgroundColor3 = theme.CardHover })
-                    tw(chip, TI_Q, { BackgroundColor3 = theme.Primary })
+                    tw(f,        TI_Q, { BackgroundColor3 = theme.CardHover })
+                    tw(arrowLbl, TI_Q, { TextColor3 = theme.PrimaryGlow })
                     hover:Fire(true)
                 end)
                 btn.MouseLeave:Connect(function()
-                    tw(f,    TI_Q, { BackgroundColor3 = theme.Card })
-                    tw(chip, TI_Q, { BackgroundColor3 = theme.SurfaceElevated })
+                    tw(f,        TI_Q, { BackgroundColor3 = theme.Card })
+                    tw(arrowLbl, TI_Q, { TextColor3 = theme.Primary })
                     hover:Fire(false)
                 end)
                 btn.MouseButton1Click:Connect(function()
-                    tw(chip, TI_Q, { BackgroundColor3 = theme.PrimaryGlow })
-                    task.delay(0.14, function() tw(chip, TI_Q, { BackgroundColor3 = theme.SurfaceElevated }) end)
+                    tw(arrowLbl, TI_Q, { TextColor3 = theme.PrimaryGlow })
+                    task.delay(0.14, function() tw(arrowLbl, TI_Q, { TextColor3 = theme.Primary }) end)
                     clicked:Fire()
                 end)
 
@@ -1572,7 +1523,7 @@ function Library:Window(opts)
             end
 
             -- ============================================================
-            -- TOGGLE  — FIX #9: SetEnabled greys track
+            -- TOGGLE
             -- ============================================================
             function Tab:Toggle(opts2)
                 opts2 = opts2 or {}
@@ -1680,7 +1631,6 @@ function Library:Window(opts)
                     Win._debouncedSave()
                 end
 
-                -- FIX #9: SetEnabled visually greys the track
                 function api:SetEnabled(v)
                     enabled = v and true or false
                     render(true)
@@ -1711,14 +1661,15 @@ function Library:Window(opts)
             end
 
             -- ============================================================
-            -- SLIDER  — FIX #2 (removed _G), FIX #6 (arrow key support)
+            -- SLIDER — CHANGE: value label shows "42 %" with space
             -- ============================================================
             function Tab:Slider(opts2)
                 opts2 = opts2 or {}
                 local min_v  = opts2.Range and opts2.Range[1] or 0
                 local max_v  = opts2.Range and opts2.Range[2] or 100
                 local inc    = opts2.Increment or 1
-                local suffix = opts2.Suffix or ""
+                -- CHANGE: space before suffix for "42 %" style
+                local suffix = opts2.Suffix and (" " .. opts2.Suffix) or ""
                 local val    = opts2.Default or min_v
                 local f      = card(62)
 
@@ -1771,7 +1722,6 @@ function Library:Window(opts)
                 corner(thumb, R_PILL)
                 stroke(thumb, Color3.fromRGB(0, 0, 0), 1, 0.86)
 
-                -- Invisible hit area that also captures keyboard focus
                 local hitArea = new("TextButton", {
                     Position               = UDim2.new(0, 16, 1, -34),
                     Size                   = UDim2.new(1, -32, 0, 28),
@@ -1783,16 +1733,13 @@ function Library:Window(opts)
                 hitArea.MouseEnter:Connect(function()
                     tw(thumb, TI_Q, { Size = UDim2.new(0, 16, 0, 16) })
                 end)
-                hitArea.MouseLeave:Connect(function()
-                    -- FIX #2: no longer uses _G — just check local dragging below
-                end)
 
                 local changed = Signal.new()
                 local api     = {}
                 api._saveEnabled = opts2.Save ~= false
                 api.Value        = val
 
-                local dragging = false -- FIX #2: this was already local; dead _G ref removed
+                local dragging = false
 
                 local function setAlpha(a)
                     a   = math.clamp(a, 0, 1)
@@ -1813,7 +1760,6 @@ function Library:Window(opts)
                     end
                 end)
 
-                -- FIX #6: arrow key support
                 local focused = false
                 hitArea.MouseButton1Click:Connect(function()
                     focused = true
@@ -1837,7 +1783,6 @@ function Library:Window(opts)
                 end)
                 table.insert(Win._connections, arrowConn)
 
-                -- defocus on click elsewhere
                 local defocusConn = routerListen("_began", function(input)
                     if input.UserInputType == Enum.UserInputType.MouseButton1 and focused then
                         local ap = hitArea.AbsolutePosition
@@ -1896,7 +1841,7 @@ function Library:Window(opts)
             end
 
             -- ============================================================
-            -- INPUT  — FIX #8: MaxLength option
+            -- INPUT
             -- ============================================================
             function Tab:Input(opts2)
                 opts2 = opts2 or {}
@@ -1928,9 +1873,9 @@ function Library:Window(opts)
                 })
                 corner(box, R_SM)
                 pad(box, nil, 10, 10, 0, 0)
-                local boxStroke = stroke(box, theme.Border, 1, 0.92)
+                -- CHANGE: nearly invisible input border
+                local boxStroke = stroke(box, theme.Border, 1, 0.96)
 
-                -- FIX #8: apply MaxLength
                 if opts2.MaxLength then
                     box.MaxVisibleGraphemes = opts2.MaxLength
                     box:GetPropertyChangedSignal("Text"):Connect(function()
@@ -1944,7 +1889,7 @@ function Library:Window(opts)
                     tw(boxStroke, TI_Q, { Color = theme.Primary, Transparency = 0.5 })
                 end)
                 box.FocusLost:Connect(function()
-                    tw(boxStroke, TI_Q, { Color = theme.Border, Transparency = 0.92 })
+                    tw(boxStroke, TI_Q, { Color = theme.Border, Transparency = 0.96 })
                 end)
 
                 local changed = Signal.new()
@@ -1967,7 +1912,6 @@ function Library:Window(opts)
                 if Win._pendingConfig and opts2.Flag and Win._pendingConfig[opts2.Flag] ~= nil then
                     api:Set(Win._pendingConfig[opts2.Flag])
                 end
-                -- FIX #16: clear pending config entry after apply
                 if Win._pendingConfig and opts2.Flag then
                     Win._pendingConfig[opts2.Flag] = nil
                 end
@@ -1975,7 +1919,7 @@ function Library:Window(opts)
             end
 
             -- ============================================================
-            -- KEYBIND
+            -- KEYBIND — CHANGE: invisible button box, blends into card
             -- ============================================================
             function Tab:Keybind(opts2)
                 opts2 = opts2 or {}
@@ -1994,12 +1938,14 @@ function Library:Window(opts)
                     Parent                 = f,
                 })
 
+                -- CHANGE: key badge blends into card background, nearly invisible border
                 local kbBtn = new("TextButton", {
                     AnchorPoint      = Vector2.new(1, 0.5),
                     Position         = UDim2.new(1, -14, 0.5, 0),
                     Size             = UDim2.new(0, 64, 0, 26),
-                    BackgroundColor3 = theme.SurfaceElevated,
-                    TextColor3       = theme.Foreground,
+                    -- CHANGE: match card background exactly so it's invisible by default
+                    BackgroundColor3 = theme.Card,
+                    TextColor3       = theme.MutedForeground,
                     Font             = FONT_MED, TextSize = ts(11),
                     Text             = tostring(current),
                     AutoButtonColor  = false,
@@ -2007,7 +1953,8 @@ function Library:Window(opts)
                     Parent           = f,
                 })
                 corner(kbBtn, R_SM)
-                stroke(kbBtn, theme.Border, 1, 0.92)
+                -- CHANGE: nearly invisible border (0.98)
+                stroke(kbBtn, theme.Border, 1, 0.98)
 
                 local pressed = Signal.new()
                 local api     = {}
@@ -2018,7 +1965,7 @@ function Library:Window(opts)
                 kbBtn.MouseButton1Click:Connect(function()
                     listening  = true
                     kbBtn.Text = "…"
-                    tw(kbBtn, TI_Q, { BackgroundColor3 = theme.Primary })
+                    tw(kbBtn, TI_Q, { BackgroundColor3 = theme.Primary, TextColor3 = theme.PrimaryForeground })
                 end)
 
                 local unlisten = routerListen("_began", function(input, gp)
@@ -2026,7 +1973,7 @@ function Library:Window(opts)
                         api.Value  = input.KeyCode.Name
                         kbBtn.Text = api.Value
                         listening  = false
-                        tw(kbBtn, TI_Q, { BackgroundColor3 = theme.SurfaceElevated })
+                        tw(kbBtn, TI_Q, { BackgroundColor3 = theme.Card, TextColor3 = theme.MutedForeground })
                         Win._debouncedSave()
                         return
                     end
@@ -2045,7 +1992,7 @@ function Library:Window(opts)
             end
 
             -- ============================================================
-            -- DROPDOWN  — FIX #5 (outside click), FIX #11 (chevron rotate)
+            -- DROPDOWN — CHANGE: valBtn blends into card, no visible border
             -- ============================================================
             function Tab:Dropdown(opts2)
                 opts2 = opts2 or {}
@@ -2067,23 +2014,25 @@ function Library:Window(opts)
                     Parent                 = f,
                 })
 
+                -- CHANGE: valBtn blends into card — same bg, no visible border
                 local valBtn = new("TextButton", {
                     AnchorPoint      = Vector2.new(1, 0.5),
                     Position         = UDim2.new(1, -14, 0.5, 0),
                     Size             = UDim2.new(0, 155, 0, 28),
-                    BackgroundColor3 = theme.SurfaceElevated,
+                    -- CHANGE: match card exactly so button is invisible
+                    BackgroundColor3 = theme.Card,
                     Font             = FONT_MED, TextSize = ts(12),
-                    TextColor3       = theme.Foreground,
+                    TextColor3       = theme.MutedForeground,
                     AutoButtonColor  = false,
                     BorderSizePixel  = 0,
                     Parent           = f,
                 })
                 corner(valBtn, R_SM)
-                stroke(valBtn, theme.Border, 1, 0.92)
+                -- CHANGE: nearly invisible border (0.98)
+                stroke(valBtn, theme.Border, 1, 0.98)
                 pad(valBtn, nil, 10, 24, 0, 0)
                 valBtn.TextXAlignment = Enum.TextXAlignment.Left
 
-                -- FIX #11: chevron that we can rotate
                 local chevron = new("TextLabel", {
                     AnchorPoint            = Vector2.new(1, 0.5),
                     Position               = UDim2.new(1, -8, 0.5, 0),
@@ -2147,9 +2096,7 @@ function Library:Window(opts)
 
                 local function close()
                     opened = false
-                    -- FIX #5: clear module-level open tracker
                     if _openDropdown == close then _openDropdown = nil end
-                    -- FIX #11: rotate chevron back
                     tw(chevron,   TI_Q, { Rotation = 0 })
                     tw(f,         TI_Q, { Size = UDim2.new(1, 0, 0, 52) })
                     tw(list,      TI_Q, { Size = UDim2.new(1, -32, 0, 0) })
@@ -2205,12 +2152,10 @@ function Library:Window(opts)
                 valBtn.MouseButton1Click:Connect(function()
                     opened = not opened
                     if opened then
-                        -- FIX #5: close previous open dropdown
                         if _openDropdown and _openDropdown ~= close then
                             _openDropdown()
                         end
                         _openDropdown = close
-                        -- FIX #11: rotate chevron open
                         tw(chevron, TI_Q, { Rotation = 180 })
                         local count = rebuild(searchBox.Text)
                         local listH = math.min(count * 28 + 8, 168)
@@ -2245,7 +2190,7 @@ function Library:Window(opts)
             end
 
             -- ============================================================
-            -- COLOR PICKER  — FIX #13: live hex + red on bad input
+            -- COLOR PICKER
             -- ============================================================
             function Tab:ColorPicker(opts2)
                 opts2 = opts2 or {}
@@ -2414,7 +2359,6 @@ function Library:Window(opts)
                     svSquare.BackgroundColor3 = hsvToColor(h, 1, 1)
                     svCursor.Position         = UDim2.new(s, 0, 1 - v, 0)
                     hueCursor.Position        = UDim2.new(h, 0, 0.5, 0)
-                    -- FIX #13: update hex live without firing Changed recursively
                     if not _suppressHex then
                         hexBox.Text = toHex(color)
                     end
@@ -2423,7 +2367,6 @@ function Library:Window(opts)
                 end
                 commit()
 
-                -- FIX #13: live hex update with debounce + red on bad input
                 local hexDebounce = debounce(function()
                     local txt = hexBox.Text:gsub("#", "")
                     if #txt == 6 then
@@ -2440,7 +2383,6 @@ function Library:Window(opts)
                             tw(hexStroke, TI_Q, { Color = theme.Destructive, Transparency = 0.4 })
                         end
                     else
-                        -- partial input: show red stroke if non-empty
                         if #txt > 0 then
                             tw(hexStroke, TI_Q, { Color = theme.Destructive, Transparency = 0.4 })
                         end
@@ -2452,7 +2394,6 @@ function Library:Window(opts)
                     hexDebounce()
                 end)
 
-                -- FIX #13: also apply on FocusLost (final commit)
                 hexBox.FocusLost:Connect(function()
                     local txt = hexBox.Text:gsub("#", "")
                     if #txt == 6 then
@@ -2615,9 +2556,8 @@ function Library:Window(opts)
                     BackgroundColor3 = theme.Card,
                     Parent           = Page,
                 })
-                corner(f, R_MD)
-                stroke(f, theme.Border, 1, 0.9)
-                sheen(f)
+                corner(f, 6)
+                stroke(f, theme.Border, 1, 0.97)
                 pad(f, 8)
                 listL(f, 0)
 
@@ -2692,8 +2632,8 @@ function Library:Window(opts)
         -- ================================================================
         -- Public Win:Tab
         -- ================================================================
-        function Win:Tab(name)
-            return buildTab(name)
+        function Win:Tab(name, icon)
+            return buildTab(name, icon)
         end
 
         -- ================================================================
@@ -2712,9 +2652,8 @@ function Library:Window(opts)
                 BorderSizePixel  = 0,
                 Parent           = page,
             })
-            corner(cardF, R_LG)
-            stroke(cardF, theme.Border, 1, 0.86)
-            sheen(cardF)
+            corner(cardF, 6)
+            stroke(cardF, theme.Border, 1, 0.97)
 
             local badge = new("Frame", {
                 AnchorPoint      = Vector2.new(0.5, 0),
@@ -2857,4 +2796,3 @@ function Library:Window(opts)
 end -- Library:Window
 
 return Library
-
