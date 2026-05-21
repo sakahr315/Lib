@@ -1195,13 +1195,14 @@ function Library:Window(opts)
             pad(TabBtn, nil, 14, 8, 0, 0)
 
             local TabBar = new("Frame", {
-                Position               = UDim2.new(0, 0, 0.5, -10),
-                Size                   = UDim2.new(0, 3, 0, 20),
+                Position               = UDim2.new(0, 0, 0.5, -9),
+                Size                   = UDim2.new(0, 3, 0, 18),
                 BackgroundColor3       = theme.Primary,
                 BackgroundTransparency = 1,
                 BorderSizePixel        = 0,
                 Parent                 = TabBtn,
             })
+            corner(TabBar, R_PILL)
 
             local _isActive = false
             TabBtn.MouseEnter:Connect(function()
@@ -1261,8 +1262,8 @@ function Library:Window(opts)
                 -- FIX #12: restore scroll position
                 Page.CanvasPosition = Tab._scrollPos
                 tw(TabBtn, TI_Q, {
-                    BackgroundColor3       = theme.SurfaceElevated,
-                    BackgroundTransparency = 0,
+                    BackgroundColor3       = theme.Accent,
+                    BackgroundTransparency = 0.35,
                     TextColor3             = theme.Foreground,
                 })
                 tw(TabBar, TI_Q, { BackgroundTransparency = 0 })
@@ -1282,8 +1283,8 @@ function Library:Window(opts)
                     BorderSizePixel  = 0,
                     Parent           = Page,
                 })
-                corner(f, R_MD)
-                stroke(f, theme.Border, 1, 0.92)
+                corner(f, R_LG)
+                stroke(f, theme.Border, 1, 0.86)
                 sheen(f)
                 return f
             end
@@ -1332,15 +1333,24 @@ function Library:Window(opts)
             function Tab:Section(name)
                 local container = new("Frame", {
                     BackgroundTransparency = 1,
-                    Size                   = UDim2.new(1, 0, 0, 22),
+                    Size                   = UDim2.new(1, 0, 0, 28),
                     Parent                 = Page,
                 })
+                local dot = new("Frame", {
+                    AnchorPoint            = Vector2.new(0, 0.5),
+                    Position               = UDim2.new(0, 2, 0.5, 1),
+                    Size                   = UDim2.new(0, 6, 0, 6),
+                    BackgroundColor3       = theme.Primary,
+                    BorderSizePixel        = 0,
+                    Parent                 = container,
+                })
+                corner(dot, R_PILL)
                 local lbl = new("TextLabel", {
                     BackgroundTransparency = 1,
-                    Position               = UDim2.new(0, 2, 0, 0),
-                    Size                   = UDim2.new(1, -2, 1, 0),
-                    Font                   = FONT_MED, TextSize = ts(10),
-                    TextColor3             = theme.MutedForeground,
+                    Position               = UDim2.new(0, 16, 0, 0),
+                    Size                   = UDim2.new(1, -16, 1, 0),
+                    Font                   = FONT_MED, TextSize = ts(11),
+                    TextColor3             = theme.Primary,
                     TextXAlignment         = Enum.TextXAlignment.Left,
                     Text                   = string.upper(name or "Section"),
                     Parent                 = container,
@@ -2859,3 +2869,4 @@ function Library:Window(opts)
 end -- Library:Window
 
 return Library
+
