@@ -1025,19 +1025,16 @@ function Library:Window(opts)
             Parent                 = sideHeader,
         })
         if opts.Version then
-            local vBadge = new("TextLabel", {
-                BackgroundTransparency = 0,
-                BackgroundColor3       = theme.Accent,
-                Position               = UDim2.new(0, 16, 0, 41),
-                Size                   = UDim2.new(0, 0, 0, 14),
-                AutomaticSize          = Enum.AutomaticSize.X,
-                Font                   = FONT_MED, TextSize = ts(10),
-                TextColor3             = theme.Primary,
-                Text                   = " " .. opts.Version .. " ",
-                TextXAlignment         = Enum.TextXAlignment.Center,
+            new("TextLabel", {
+                BackgroundTransparency = 1,
+                Position               = UDim2.new(0, 16, 0, 38),
+                Size                   = UDim2.new(1, -32, 0, 14),
+                Font                   = FONT_REG, TextSize = ts(11),
+                TextColor3             = theme.MutedForeground,
+                Text                   = opts.Version,
+                TextXAlignment         = Enum.TextXAlignment.Left,
                 Parent                 = sideHeader,
             })
-            corner(vBadge, R_SM)
         end
 
         new("TextLabel", {
@@ -1262,8 +1259,8 @@ function Library:Window(opts)
                 -- FIX #12: restore scroll position
                 Page.CanvasPosition = Tab._scrollPos
                 tw(TabBtn, TI_Q, {
-                    BackgroundColor3       = theme.Accent,
-                    BackgroundTransparency = 0.35,
+                    BackgroundColor3       = theme.SurfaceElevated,
+                    BackgroundTransparency = 0,
                     TextColor3             = theme.Foreground,
                 })
                 tw(TabBar, TI_Q, { BackgroundTransparency = 0 })
@@ -1333,22 +1330,13 @@ function Library:Window(opts)
             function Tab:Section(name)
                 local container = new("Frame", {
                     BackgroundTransparency = 1,
-                    Size                   = UDim2.new(1, 0, 0, 28),
+                    Size                   = UDim2.new(1, 0, 0, 26),
                     Parent                 = Page,
                 })
-                local dot = new("Frame", {
-                    AnchorPoint            = Vector2.new(0, 0.5),
-                    Position               = UDim2.new(0, 2, 0.5, 1),
-                    Size                   = UDim2.new(0, 6, 0, 6),
-                    BackgroundColor3       = theme.Primary,
-                    BorderSizePixel        = 0,
-                    Parent                 = container,
-                })
-                corner(dot, R_PILL)
                 local lbl = new("TextLabel", {
                     BackgroundTransparency = 1,
-                    Position               = UDim2.new(0, 16, 0, 0),
-                    Size                   = UDim2.new(1, -16, 1, 0),
+                    Position               = UDim2.new(0, 2, 0, 6),
+                    Size                   = UDim2.new(1, -2, 0, 14),
                     Font                   = FONT_MED, TextSize = ts(11),
                     TextColor3             = theme.Primary,
                     TextXAlignment         = Enum.TextXAlignment.Left,
