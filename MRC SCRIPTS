@@ -1,58 +1,50 @@
 --[[
 ╔═══════════════════════════════════════════════════════════════════════════╗
-║                         MRC UI  v1.1.0                                   ║
+║                         MRC UI  v1.2.0                                   ║
 ║              A premium Roblox UI library with dark-cyan theme            ║
 ╠═══════════════════════════════════════════════════════════════════════════╣
-║  Visual overhaul v1.0 → v1.1:                                            ║
-║  • Larger, cleaner ctrl buttons (close/minimize) with pill shape         ║
-║  • Removed all random cyan accent lines (sections, buttons, labels)      ║
-║  • Removed heavy black drop-shadow behind the window                     ║
-║  • Consistent radius scale: r4 / r8 / r12 / r16 throughout              ║
-║  • Toggle redesign: proper pill, softer inactive, glow on active         ║
-║  • Built-in auto Credits tab (mrc__s / discord.gg/YV3GjGw3PY)           ║
-║  • General spacing, contrast and hierarchy polish                        ║
-║  • All public APIs unchanged — drop-in replacement for v1.0              ║
+║  v1.1 → v1.2 improvements:                                               ║
+║  #1  InputRouter connections cleaned up on Win:Destroy()                 ║
+║  #2  Removed dead _G["_mrcSliderDrag_..."] reference                     ║
+║  #3  Tooltip RunService connection tracked and cleaned up                ║
+║  #4  debounce save guarded with _destroyed flag                          ║
+║  #5  Dropdowns close on outside click (module-level tracker)             ║
+║  #6  Slider supports Left/Right arrow key when focused                   ║
+║  #7  Tab:LabeledDivider(text) — horizontal rule with centred label       ║
+║  #8  Input supports MaxLength option                                      ║
+║  #9  Toggle SetEnabled greys out track visually                          ║
+║  #10 Notification queue cap (max 5, dismisses oldest)                    ║
+║  #11 Dropdown chevron rotates 180° on open/close                         ║
+║  #12 Page scroll position saved/restored on tab switch                   ║
+║  #13 ColorPicker hex updates live with debounce; red on bad input        ║
+║  #14 Window drag clamped to screen bounds                                ║
+║  #15 Config save error surfaced via Library.OnConfigError callback       ║
+║  #16 _pendingConfig cleared after first apply                            ║
+║  #17 Win:ExportConfig() / Win:ImportConfig(json) added                   ║
+║  #18 Library.TextScale multiplier for small screens                      ║
+║  #19 Tooltip clamped to viewport edges                                   ║
+║  #20 Tab:Button accepts Icon param (emoji/unicode left of label)         ║
+║  #21 Window size configurable via opts.Size = {w, h}                     ║
+║  #22 Sidebar width configurable via opts.SidebarWidth                    ║
+║  #23 Library.Version exposed; mismatch warns in output                   ║
+║  All public APIs remain backwards-compatible                             ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
-
-CHANGE RATIONALE (per request):
-  1. Ctrl buttons — old 24px buttons were easy to mis-click; new 28×28 pill
-     buttons have a larger hit-zone, clearer icon sizing and a subtler but
-     more readable hover bg tint.
-  2. Cyan lines removed — decorative accent marks on every section/button
-     created visual noise and diluted the cyan identity. Cyan is now reserved
-     for interactive state only (active tab bar, toggle on, slider fill,
-     primary buttons). The result is a cleaner hierarchy.
-  3. Drop-shadow removed — the large semi-transparent black frame behind the
-     window made the background feel muddy. Removed entirely; the border
-     stroke + solid Background color already provide sufficient layering.
-  4. Radius scale — introduced R_SM=6, R_MD=10, R_LG=14, R_PILL=999 so every
-     surface uses a deliberate value rather than scattered arbitrary numbers.
-  5. Toggle redesign — knob is now 16px on a 44×22 track with a proper 11px
-     corner radius (true pill). Inactive track is a slightly lighter tinted
-     grey so the knob is always visible. Active track glows with a
-     semi-transparent Primary overlay beneath it for a soft halo effect.
-  6. Credits tab — auto-appended as the final tab on every window; contains
-     a centred card with creator name, Discord, and a copy-invite button.
-     Zero API surface needed from the script author.
-  7. General polish — card padding tightened, sidebar header baseline fixed,
-     notification card padding more balanced, input label sizing unified.
 ]]
 
 -- =========================================================================
 -- 1. SERVICES + EXECUTOR SHIMS
 -- =========================================================================
-local CoreGui          = game:GetService("CoreGui")
-local Players          = game:GetService("Players")
-local UIS              = game:GetService("UserInputService")
-local TweenService     = game:GetService("TweenService")
-local RunService       = game:GetService("RunService")
-local HttpService      = game:GetService("HttpService")
-local TextService      = game:GetService("TextService")
+local CoreGui      = game:GetService("CoreGui")
+local Players      = game:GetService("Players")
+local UIS          = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local RunService   = game:GetService("RunService")
+local HttpService  = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
 
-local function _safe(fn)   return type(fn) == "function" and fn or function() end end
-local function _safeR(fn)  return type(fn) == "function" and fn or function() return nil end end
+local function _safe(fn)  return type(fn) == "function" and fn or function() end end
+local function _safeR(fn) return type(fn) == "function" and fn or function() return nil end end
 
 local _writefile    = _safe (rawget(getfenv(), "writefile"))
 local _readfile     = _safeR(rawget(getfenv(), "readfile"))
@@ -94,13 +86,18 @@ end
 -- 3. INPUT ROUTER
 -- =========================================================================
 local InputRouter = { _began = {}, _ended = {}, _changed = {} }
+
+-- FIX #1: store router connections so they can be disconnected on cleanup
 local _routerConns = {}
-_routerConns[1] = UIS.InputBegan:Connect(function(i,g)
-    for _,fn in pairs(InputRouter._began)   do pcall(fn,i,g) end end)
-_routerConns[2] = UIS.InputEnded:Connect(function(i,g)
-    for _,fn in pairs(InputRouter._ended)   do pcall(fn,i,g) end end)
-_routerConns[3] = UIS.InputChanged:Connect(function(i,g)
-    for _,fn in pairs(InputRouter._changed) do pcall(fn,i,g) end end)
+_routerConns[1] = UIS.InputBegan:Connect(function(i, g)
+    for _, fn in pairs(InputRouter._began)   do pcall(fn, i, g) end
+end)
+_routerConns[2] = UIS.InputEnded:Connect(function(i, g)
+    for _, fn in pairs(InputRouter._ended)   do pcall(fn, i, g) end
+end)
+_routerConns[3] = UIS.InputChanged:Connect(function(i, g)
+    for _, fn in pairs(InputRouter._changed) do pcall(fn, i, g) end
+end)
 
 local function routerListen(bucket, fn)
     local id = {}
@@ -113,75 +110,71 @@ end
 -- =========================================================================
 local Themes = {
     Default = {
-        Background       = Color3.fromRGB(9,   13,  17),
-        Surface          = Color3.fromRGB(14,  21,  28),
-        SurfaceElevated  = Color3.fromRGB(21,  31,  41),
-        Card             = Color3.fromRGB(20,  29,  38),
-        CardHover        = Color3.fromRGB(26,  37,  48),
-        Sidebar          = Color3.fromRGB(11,  17,  22),
-        Border           = Color3.fromRGB(255, 255, 255),
-        Foreground       = Color3.fromRGB(228, 233, 240),
-        MutedForeground  = Color3.fromRGB(120, 132, 148),
-        Primary          = Color3.fromRGB(56,  196, 218),
-        PrimaryGlow      = Color3.fromRGB(110, 220, 238),
-        PrimaryForeground= Color3.fromRGB(6,   12,  16),
-        Accent           = Color3.fromRGB(22,  50,  64),
-        Destructive      = Color3.fromRGB(220, 80,  80),
-        Success          = Color3.fromRGB(72,  194, 132),
-        Warning          = Color3.fromRGB(220, 172, 72),
-        Info             = Color3.fromRGB(82,  142, 220),
+        Background        = Color3.fromRGB(9,   13,  17),
+        Surface           = Color3.fromRGB(14,  21,  28),
+        SurfaceElevated   = Color3.fromRGB(21,  31,  41),
+        Card              = Color3.fromRGB(20,  29,  38),
+        CardHover         = Color3.fromRGB(26,  37,  48),
+        Sidebar           = Color3.fromRGB(11,  17,  22),
+        Border            = Color3.fromRGB(255, 255, 255),
+        Foreground        = Color3.fromRGB(228, 233, 240),
+        MutedForeground   = Color3.fromRGB(120, 132, 148),
+        Primary           = Color3.fromRGB(56,  196, 218),
+        PrimaryGlow       = Color3.fromRGB(110, 220, 238),
+        PrimaryForeground = Color3.fromRGB(6,   12,  16),
+        Accent            = Color3.fromRGB(22,  50,  64),
+        Destructive       = Color3.fromRGB(220, 80,  80),
+        Success           = Color3.fromRGB(72,  194, 132),
+        Warning           = Color3.fromRGB(220, 172, 72),
+        Info              = Color3.fromRGB(82,  142, 220),
     },
     Amethyst = {
-        Background       = Color3.fromRGB(18,  16,  28),
-        Surface          = Color3.fromRGB(26,  23,  40),
-        SurfaceElevated  = Color3.fromRGB(34,  29,  50),
-        Card             = Color3.fromRGB(29,  26,  43),
-        CardHover        = Color3.fromRGB(37,  33,  54),
-        Sidebar          = Color3.fromRGB(22,  20,  34),
-        Border           = Color3.fromRGB(255, 255, 255),
-        Foreground       = Color3.fromRGB(240, 238, 248),
-        MutedForeground  = Color3.fromRGB(138, 132, 158),
-        Primary          = Color3.fromRGB(170, 110, 240),
-        PrimaryGlow      = Color3.fromRGB(200, 150, 250),
-        PrimaryForeground= Color3.fromRGB(18,  14,  28),
-        Accent           = Color3.fromRGB(68,  48,  108),
-        Destructive      = Color3.fromRGB(220, 75,  85),
-        Success          = Color3.fromRGB(110, 196, 126),
-        Warning          = Color3.fromRGB(220, 172, 72),
-        Info             = Color3.fromRGB(82,  132, 220),
+        Background        = Color3.fromRGB(18,  16,  28),
+        Surface           = Color3.fromRGB(26,  23,  40),
+        SurfaceElevated   = Color3.fromRGB(34,  29,  50),
+        Card              = Color3.fromRGB(29,  26,  43),
+        CardHover         = Color3.fromRGB(37,  33,  54),
+        Sidebar           = Color3.fromRGB(22,  20,  34),
+        Border            = Color3.fromRGB(255, 255, 255),
+        Foreground        = Color3.fromRGB(240, 238, 248),
+        MutedForeground   = Color3.fromRGB(138, 132, 158),
+        Primary           = Color3.fromRGB(170, 110, 240),
+        PrimaryGlow       = Color3.fromRGB(200, 150, 250),
+        PrimaryForeground = Color3.fromRGB(18,  14,  28),
+        Accent            = Color3.fromRGB(68,  48,  108),
+        Destructive       = Color3.fromRGB(220, 75,  85),
+        Success           = Color3.fromRGB(110, 196, 126),
+        Warning           = Color3.fromRGB(220, 172, 72),
+        Info              = Color3.fromRGB(82,  132, 220),
     },
     Crimson = {
-        Background       = Color3.fromRGB(20,  14,  16),
-        Surface          = Color3.fromRGB(30,  20,  22),
-        SurfaceElevated  = Color3.fromRGB(38,  27,  29),
-        Card             = Color3.fromRGB(32,  22,  24),
-        CardHover        = Color3.fromRGB(42,  30,  33),
-        Sidebar          = Color3.fromRGB(24,  16,  18),
-        Border           = Color3.fromRGB(255, 255, 255),
-        Foreground       = Color3.fromRGB(244, 237, 237),
-        MutedForeground  = Color3.fromRGB(158, 138, 140),
-        Primary          = Color3.fromRGB(220, 60,  80),
-        PrimaryGlow      = Color3.fromRGB(240, 100, 115),
-        PrimaryForeground= Color3.fromRGB(18,  8,   10),
-        Accent           = Color3.fromRGB(98,  38,  48),
-        Destructive      = Color3.fromRGB(220, 75,  55),
-        Success          = Color3.fromRGB(68,  196, 126),
-        Warning          = Color3.fromRGB(220, 172, 72),
-        Info             = Color3.fromRGB(76,  132, 220),
+        Background        = Color3.fromRGB(20,  14,  16),
+        Surface           = Color3.fromRGB(30,  20,  22),
+        SurfaceElevated   = Color3.fromRGB(38,  27,  29),
+        Card              = Color3.fromRGB(32,  22,  24),
+        CardHover         = Color3.fromRGB(42,  30,  33),
+        Sidebar           = Color3.fromRGB(24,  16,  18),
+        Border            = Color3.fromRGB(255, 255, 255),
+        Foreground        = Color3.fromRGB(244, 237, 237),
+        MutedForeground   = Color3.fromRGB(158, 138, 140),
+        Primary           = Color3.fromRGB(220, 60,  80),
+        PrimaryGlow       = Color3.fromRGB(240, 100, 115),
+        PrimaryForeground = Color3.fromRGB(18,  8,   10),
+        Accent            = Color3.fromRGB(98,  38,  48),
+        Destructive       = Color3.fromRGB(220, 75,  55),
+        Success           = Color3.fromRGB(68,  196, 126),
+        Warning           = Color3.fromRGB(220, 172, 72),
+        Info              = Color3.fromRGB(76,  132, 220),
     },
 }
 
 -- =========================================================================
 -- 5. RADIUS SCALE
---    R_SM  =  6   small controls: chips, keybind badges, input corners
---    R_MD  = 10   cards, dropdown buttons, notification cards
---    R_LG  = 14   window frame, sidebar, page panels
---    R_PILL= 999  toggles, pills, circular elements
 -- =========================================================================
 local R_SM   = 6
 local R_MD   = 10
 local R_LG   = 14
-local R_PILL = 999   -- UICorner clamps to 50%, so large value = full pill
+local R_PILL = 999
 
 -- =========================================================================
 -- 6. HELPERS
@@ -241,6 +234,7 @@ local function listL(p, gap, dir, hAlign)
     })
 end
 
+-- FIX #14: clamp drag to viewport bounds
 local function makeDraggable(handle, target)
     local dragging, dragStart, startPos
     handle.InputBegan:Connect(function(input)
@@ -250,17 +244,22 @@ local function makeDraggable(handle, target)
             dragStart = input.Position
             startPos  = target.Position
             input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
             end)
         end
     end)
     UIS.InputChanged:Connect(function(input)
         if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
         or input.UserInputType == Enum.UserInputType.Touch) then
-            local d = input.Position - dragStart
-            target.Position = UDim2.new(
-                startPos.X.Scale, startPos.X.Offset + d.X,
-                startPos.Y.Scale, startPos.Y.Offset + d.Y)
+            local d  = input.Position - dragStart
+            local vp = workspace.CurrentCamera.ViewportSize
+            local sw = target.AbsoluteSize.X
+            local sh = target.AbsoluteSize.Y
+            local nx = math.clamp(startPos.X.Offset + d.X, 0, vp.X - sw)
+            local ny = math.clamp(startPos.Y.Offset + d.Y, 0, vp.Y - sh)
+            target.Position = UDim2.new(startPos.X.Scale, nx, startPos.Y.Scale, ny)
         end
     end)
 end
@@ -287,7 +286,6 @@ local function debounce(fn, delay)
     end
 end
 
--- Top-sheen highlight (1px white line at card top for elevation illusion)
 local function sheen(parent)
     new("Frame", {
         Size                   = UDim2.new(1, -2, 0, 1),
@@ -313,23 +311,26 @@ pcall(function()
 end)
 
 local ScreenGui = new("ScreenGui", {
-    Name             = "MRCUI_v1",
-    ResetOnSpawn     = false,
-    ZIndexBehavior   = Enum.ZIndexBehavior.Sibling,
-    IgnoreGuiInset   = true,
-    DisplayOrder     = 999,
-    Parent           = getParent(),
+    Name           = "MRCUI_v1",
+    ResetOnSpawn   = false,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+    IgnoreGuiInset = true,
+    DisplayOrder   = 999,
+    Parent         = getParent(),
 })
+
+-- FIX #5: track currently open dropdown so outside clicks close it
+local _openDropdown = nil
 
 -- Context menu (shared singleton)
 local CtxMenu = new("Frame", {
-    Size                  = UDim2.new(0, 160, 0, 0),
-    BackgroundColor3      = Color3.fromRGB(21, 31, 41),
-    ClipsDescendants      = true,
-    Visible               = false,
-    ZIndex                = 9000,
-    BorderSizePixel       = 0,
-    Parent                = ScreenGui,
+    Size             = UDim2.new(0, 160, 0, 0),
+    BackgroundColor3 = Color3.fromRGB(21, 31, 41),
+    ClipsDescendants = true,
+    Visible          = false,
+    ZIndex           = 9000,
+    BorderSizePixel  = 0,
+    Parent           = ScreenGui,
 })
 corner(CtxMenu, R_MD)
 stroke(CtxMenu, Color3.fromRGB(255, 255, 255), 1, 0.86)
@@ -349,18 +350,26 @@ local function hideCtx()
     tw(CtxMenu, TI_Q, { Size = UDim2.new(0, 160, 0, 0) })
     task.delay(0.15, function() CtxMenu.Visible = false end)
 end
+
 routerListen("_began", function(input, gp)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 and ctxOpen then hideCtx() end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        -- FIX #5: close open dropdown on outside click
+        if _openDropdown then
+            _openDropdown()
+            _openDropdown = nil
+        end
+        if ctxOpen then hideCtx() end
+    end
 end)
 
--- Notification holder — top-right, stacks downward
+-- Notification holder
 local NotifHolder = new("Frame", {
-    Name                   = "Notifications",
-    AnchorPoint            = Vector2.new(1, 0),
-    Position               = UDim2.new(1, -16, 0, 16),
-    Size                   = UDim2.new(0, 300, 1, -32),
+    Name        = "Notifications",
+    AnchorPoint = Vector2.new(1, 0),
+    Position    = UDim2.new(1, -16, 0, 16),
+    Size        = UDim2.new(0, 300, 1, -32),
     BackgroundTransparency = 1,
-    Parent                 = ScreenGui,
+    Parent      = ScreenGui,
 })
 new("UIListLayout", {
     Padding             = UDim.new(0, 8),
@@ -370,6 +379,10 @@ new("UIListLayout", {
     VerticalAlignment   = Enum.VerticalAlignment.Top,
     Parent              = NotifHolder,
 })
+
+-- FIX #10: notification queue cap
+local _notifQueue = {}
+local NOTIF_MAX   = 5
 
 -- =========================================================================
 -- 7b. TOOLTIP
@@ -403,7 +416,9 @@ local TooltipLbl = new("TextLabel", {
     Parent                 = Tooltip,
 })
 
+-- FIX #3: track tooltip RenderStepped conn in module scope so it can be cleaned up
 local _tipConn
+
 local function showTooltip(text)
     if not text or text == "" then return end
     TooltipLbl.Text = text
@@ -411,9 +426,15 @@ local function showTooltip(text)
     tw(Tooltip,    TI_Q, { BackgroundTransparency = 0 })
     tw(TooltipLbl, TI_Q, { TextTransparency = 0 })
     if _tipConn then _tipConn:Disconnect() end
+    -- FIX #19: clamp tooltip to viewport
     local function follow()
         local mp = UIS:GetMouseLocation()
-        Tooltip.Position = UDim2.new(0, mp.X + 14, 0, mp.Y + 18)
+        local vp = workspace.CurrentCamera.ViewportSize
+        local tw_ = Tooltip.AbsoluteSize.X
+        local th  = Tooltip.AbsoluteSize.Y
+        local tx  = math.clamp(mp.X + 14, 0, vp.X - tw_ - 4)
+        local ty  = math.clamp(mp.Y + 18, 0, vp.Y - th  - 4)
+        Tooltip.Position = UDim2.new(0, tx, 0, ty)
     end
     follow()
     _tipConn = RunService.RenderStepped:Connect(follow)
@@ -453,7 +474,9 @@ local function decorate(api, frame, opts)
             if d:IsA("TextButton") or d:IsA("TextBox") then
                 d.Active = v and true or false; d.AutoButtonColor = false
             end
-            if d:IsA("TextLabel") then tw(d, TI_Q, { TextTransparency = v and 0 or 0.5 }) end
+            if d:IsA("TextLabel") then
+                tw(d, TI_Q, { TextTransparency = v and 0 or 0.5 })
+            end
         end
         return self
     end
@@ -477,9 +500,26 @@ local Library = {
     Flags           = {},
     Theme           = Themes.Default,
     Windows         = {},
-    Version         = "1.1.0",
+    -- FIX #23: expose version
+    Version         = "1.2.0",
+    -- FIX #18: global text scale multiplier (1 = default, try 0.85 for small screens)
+    TextScale       = 1,
     _themeListeners = {},
+    -- FIX #15: config error callback
+    OnConfigError   = nil,
 }
+
+-- FIX #23: version mismatch helper
+local _EXPECTED_VERSION = "1.2.0"
+if Library.Version ~= _EXPECTED_VERSION then
+    warn("[MRC UI] Version mismatch: loaded " .. tostring(Library.Version)
+        .. ", expected " .. _EXPECTED_VERSION)
+end
+
+-- FIX #18: helper to scale text sizes
+local function ts(size)
+    return math.round(size * Library.TextScale)
+end
 
 function Library:OnThemeChanged(fn)
     local id = {}
@@ -497,7 +537,7 @@ function Library:SetTheme(themeOrName)
 end
 
 -- =========================================================================
--- 9. NOTIFICATIONS  (compact toast)
+-- 9. NOTIFICATIONS
 -- =========================================================================
 local NOTIF_ICONS  = { success = "✓", warning = "!", error = "✕", info = "i" }
 local NOTIF_COLORS = { success = "Success", warning = "Warning", error = "Destructive", info = "Info" }
@@ -510,6 +550,12 @@ function Library:Notify(opts)
     local icon      = NOTIF_ICONS[notifType] or "i"
     local duration  = opts.Duration or 5
 
+    -- FIX #10: enforce max queue — dismiss oldest if over cap
+    if #_notifQueue >= NOTIF_MAX then
+        local oldest = table.remove(_notifQueue, 1)
+        if oldest and oldest.dismiss then oldest.dismiss() end
+    end
+
     local card = new("Frame", {
         Size                   = UDim2.new(1, 0, 0, 64),
         BackgroundColor3       = theme.SurfaceElevated,
@@ -521,7 +567,6 @@ function Library:Notify(opts)
     stroke(card, theme.Border, 1, 0.88)
     sheen(card)
 
-    -- 3px left accent bar
     local accentBar = new("Frame", {
         Size                   = UDim2.new(0, 3, 1, 0),
         Position               = UDim2.new(0, 0, 0, 0),
@@ -532,13 +577,12 @@ function Library:Notify(opts)
         Parent                 = card,
     })
 
-    -- Icon badge
     local iconBadge = new("TextLabel", {
         Position               = UDim2.new(0, 14, 0.5, -10),
         Size                   = UDim2.new(0, 20, 0, 20),
         BackgroundColor3       = accentCol,
         BackgroundTransparency = 0.82,
-        Font                   = FONT_BOLD, TextSize = 11,
+        Font                   = FONT_BOLD, TextSize = ts(11),
         TextColor3             = accentCol,
         TextTransparency       = 1,
         Text                   = icon,
@@ -551,7 +595,7 @@ function Library:Notify(opts)
         Position               = UDim2.new(0, 44, 0, 12),
         Size                   = UDim2.new(1, -56, 0, 18),
         BackgroundTransparency = 1,
-        Font                   = FONT_MED, TextSize = 13,
+        Font                   = FONT_MED, TextSize = ts(13),
         TextColor3             = theme.Foreground,
         TextTransparency       = 1,
         TextXAlignment         = Enum.TextXAlignment.Left,
@@ -564,7 +608,7 @@ function Library:Notify(opts)
         Position               = UDim2.new(0, 44, 0, 33),
         Size                   = UDim2.new(1, -56, 0, 18),
         BackgroundTransparency = 1,
-        Font                   = FONT_REG, TextSize = 11,
+        Font                   = FONT_REG, TextSize = ts(11),
         TextColor3             = theme.MutedForeground,
         TextTransparency       = 1,
         TextWrapped            = true,
@@ -574,7 +618,6 @@ function Library:Notify(opts)
         Parent                 = card,
     })
 
-    -- Progress drain bar
     local drain = new("Frame", {
         Position               = UDim2.new(0, 0, 1, -2),
         Size                   = UDim2.new(1, 0, 0, 2),
@@ -602,14 +645,22 @@ function Library:Notify(opts)
     })
 
     local dismissed = false
+    local entry     = {}
     local function dismiss()
         if dismissed then return end
         dismissed = true
+        -- remove from queue
+        for i, e in ipairs(_notifQueue) do
+            if e == entry then table.remove(_notifQueue, i); break end
+        end
         tw(card, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
             { BackgroundTransparency = 1, Position = UDim2.new(0, 320, 0, 0) })
         task.wait(0.2)
         pcall(function() card:Destroy() end)
     end
+    entry.dismiss = dismiss
+    table.insert(_notifQueue, entry)
+
     btn.MouseButton1Click:Connect(dismiss)
     task.delay(duration, dismiss)
 end
@@ -637,17 +688,17 @@ local function showLoading(theme, title, subtitle, duration)
 
     new("TextLabel", {
         BackgroundTransparency = 1,
-        Position   = UDim2.new(0, 0, 0, 28), Size = UDim2.new(1, 0, 0, 24),
-        Font       = FONT_BOLD, TextSize = 20,
+        Position = UDim2.new(0, 0, 0, 28), Size = UDim2.new(1, 0, 0, 24),
+        Font     = FONT_BOLD, TextSize = ts(20),
         TextColor3 = theme.Foreground, Text = title or "Loading",
-        Parent     = box,
+        Parent   = box,
     })
     new("TextLabel", {
         BackgroundTransparency = 1,
-        Position   = UDim2.new(0, 0, 0, 56), Size = UDim2.new(1, 0, 0, 18),
-        Font       = FONT_REG, TextSize = 13,
+        Position = UDim2.new(0, 0, 0, 56), Size = UDim2.new(1, 0, 0, 18),
+        Font     = FONT_REG, TextSize = ts(13),
         TextColor3 = theme.MutedForeground, Text = subtitle or "",
-        Parent     = box,
+        Parent   = box,
     })
     local barBg = new("Frame", {
         AnchorPoint      = Vector2.new(0.5, 1),
@@ -714,21 +765,21 @@ local function runKeySystem(opts, onPass, notifyFn)
     new("TextLabel", {
         BackgroundTransparency = 1,
         Position = UDim2.new(0, 16, 0, 14), Size = UDim2.new(1, -32, 0, 24),
-        Font = FONT_BOLD, TextSize = 18,
+        Font = FONT_BOLD, TextSize = ts(18),
         TextColor3 = theme.Foreground, TextXAlignment = Enum.TextXAlignment.Left,
         Text = opts.Title or "Key Required", Parent = box,
     })
     new("TextLabel", {
         BackgroundTransparency = 1,
         Position = UDim2.new(0, 16, 0, 42), Size = UDim2.new(1, -32, 0, 18),
-        Font = FONT_REG, TextSize = 13,
+        Font = FONT_REG, TextSize = ts(13),
         TextColor3 = theme.MutedForeground, TextXAlignment = Enum.TextXAlignment.Left,
         Text = opts.Subtitle or "Enter the key below to continue.", Parent = box,
     })
     new("TextLabel", {
         BackgroundTransparency = 1,
         Position = UDim2.new(0, 16, 0, 62), Size = UDim2.new(1, -32, 0, 30),
-        Font = FONT_REG, TextSize = 12,
+        Font = FONT_REG, TextSize = ts(12),
         TextColor3 = theme.MutedForeground, TextXAlignment = Enum.TextXAlignment.Left,
         TextWrapped = true, Text = opts.Note or "", Parent = box,
     })
@@ -736,7 +787,7 @@ local function runKeySystem(opts, onPass, notifyFn)
     local input = new("TextBox", {
         Position          = UDim2.new(0, 16, 0, 100), Size = UDim2.new(1, -32, 0, 36),
         BackgroundColor3  = theme.SurfaceElevated,
-        Font              = FONT_REG, TextSize = 14,
+        Font              = FONT_REG, TextSize = ts(14),
         TextColor3        = theme.Foreground,
         PlaceholderText   = "Enter key…",
         PlaceholderColor3 = theme.MutedForeground,
@@ -756,7 +807,7 @@ local function runKeySystem(opts, onPass, notifyFn)
         local b = new("TextButton", {
             Position = UDim2.new(0, x, 1, -52), Size = UDim2.new(0, w, 0, 36),
             BackgroundColor3 = bg, TextColor3 = fg,
-            Font = FONT_MED, TextSize = 13, Text = text,
+            Font = FONT_MED, TextSize = ts(13), Text = text,
             AutoButtonColor = false, Parent = box,
         })
         corner(b, R_MD)
@@ -801,6 +852,8 @@ end
 local function saveConfig(window)
     local cfg = window._config
     if not (cfg and cfg.Enabled) then return end
+    -- FIX #4: guard against save after destroy
+    if window._destroyed then return end
     local data = { __version = CONFIG_VERSION }
     for flag, ref in pairs(Library.Flags) do
         if ref._saveEnabled ~= false then
@@ -808,10 +861,14 @@ local function saveConfig(window)
             if ok then data[flag] = val end
         end
     end
-    pcall(function()
+    local ok, err = pcall(function()
         if cfg.FolderName and not _isfolder(cfg.FolderName) then _makefolder(cfg.FolderName) end
         _writefile(cfgPath(cfg.FolderName, cfg.FileName), HttpService:JSONEncode(data))
     end)
+    -- FIX #15: surface config errors
+    if not ok and Library.OnConfigError then
+        pcall(Library.OnConfigError, tostring(err))
+    end
 end
 
 local function loadConfig(window)
@@ -835,6 +892,12 @@ function Library:Window(opts)
     local theme    = self.Theme
     local notifyFn = function(o) self:Notify(o) end
 
+    -- FIX #21: configurable size
+    local WIN_W = (opts.Size and opts.Size[1]) or 720
+    local WIN_H = (opts.Size and opts.Size[2]) or 460
+    -- FIX #22: configurable sidebar width
+    local SIDE_W = opts.SidebarWidth or 180
+
     local function build()
         if opts.LoadingTitle then
             showLoading(theme, opts.LoadingTitle, opts.LoadingSubtitle, 1.0)
@@ -842,32 +905,31 @@ function Library:Window(opts)
         end
 
         local Win = {
-            Tabs         = {},
-            _config      = opts.ConfigurationSaving,
-            _connections = {},
-            _themeUnreg  = nil,
+            Tabs          = {},
+            _config       = opts.ConfigurationSaving,
+            _connections  = {},
+            _themeUnreg   = nil,
+            _destroyed    = false, -- FIX #4
         }
-        Win._debouncedSave = debounce(function() saveConfig(Win) end, 0.5)
+        -- FIX #4: wrap debounce save so it no-ops after destroy
+        Win._debouncedSave = debounce(function()
+            if not Win._destroyed then saveConfig(Win) end
+        end, 0.5)
 
-        -- ── Root window frame — NO external shadow frame ──────────────────
-        -- WHY: The old Shadow frame was a large semi-transparent black rect
-        --      that made the game bleed through and looked muddy.  The window
-        --      border stroke + solid background provide sufficient depth cues.
+        -- ── Root window frame ─────────────────────────────────────────────
         local Root = new("Frame", {
             Name             = "Window",
             AnchorPoint      = Vector2.new(0.5, 0.5),
             Position         = UDim2.new(0.5, 0, 0.5, 0),
-            Size             = UDim2.new(0, 720, 0, 460),
+            Size             = UDim2.new(0, WIN_W, 0, WIN_H),
             BackgroundColor3 = theme.Background,
             ClipsDescendants = true,
             Parent           = ScreenGui,
         })
         corner(Root, R_LG)
-        -- Slightly more visible stroke so the window has a clear edge
         stroke(Root, theme.Border, 1, 0.80)
         Win.Root = Root
 
-        -- Subtle top-corner cyan gradient tint (very faint, keeps identity)
         new("UIGradient", {
             Color = ColorSequence.new{
                 ColorSequenceKeypoint.new(0, theme.Primary),
@@ -882,7 +944,7 @@ function Library:Window(opts)
             Parent   = Root,
         })
 
-        -- ── Drag handle (top header bar) ──────────────────────────────────
+        -- ── Header / drag handle ──────────────────────────────────────────
         local Header = new("Frame", {
             Size                   = UDim2.new(1, 0, 0, 40),
             BackgroundTransparency = 1,
@@ -892,10 +954,9 @@ function Library:Window(opts)
         })
         makeDraggable(Header, Root)
 
-        -- Thin separator below header (pages side only)
         new("Frame", {
-            Position               = UDim2.new(0, 180, 0, 40),
-            Size                   = UDim2.new(1, -180, 0, 1),
+            Position               = UDim2.new(0, SIDE_W, 0, 40),
+            Size                   = UDim2.new(1, -SIDE_W, 0, 1),
             BackgroundColor3       = theme.Border,
             BackgroundTransparency = 0.90,
             BorderSizePixel        = 0,
@@ -903,12 +964,7 @@ function Library:Window(opts)
             Parent                 = Root,
         })
 
-        -- ── Control buttons: Close + Minimise ─────────────────────────────
-        --  WHY: Old 24×24 squares were too small. New design:
-        --    • 28×28 pill-shaped buttons (R_PILL) with clear icon
-        --    • Transparent bg by default, coloured fill on hover
-        --    • 10px inner padding around the buttons group
-        --    • Icons sized at 16 so they sit comfortably in the pill
+        -- ── Control buttons ───────────────────────────────────────────────
         local function ctrlBtn(icon, xOff, hoverCol)
             local b = new("TextButton", {
                 AnchorPoint            = Vector2.new(1, 0.5),
@@ -917,7 +973,7 @@ function Library:Window(opts)
                 BackgroundColor3       = hoverCol,
                 BackgroundTransparency = 1,
                 Text                   = icon,
-                Font                   = FONT_BOLD, TextSize = 16,
+                Font                   = FONT_BOLD, TextSize = ts(16),
                 TextColor3             = theme.MutedForeground,
                 AutoButtonColor        = false,
                 ZIndex                 = 60,
@@ -938,12 +994,11 @@ function Library:Window(opts)
         -- ── Sidebar ───────────────────────────────────────────────────────
         local Sidebar = new("Frame", {
             Position         = UDim2.new(0, 0, 0, 0),
-            Size             = UDim2.new(0, 180, 1, 0),
+            Size             = UDim2.new(0, SIDE_W, 1, 0),
             BackgroundColor3 = theme.Sidebar,
             BorderSizePixel  = 0,
             Parent           = Root,
         })
-        -- Right edge divider
         new("Frame", {
             Position               = UDim2.new(1, -1, 0, 0),
             Size                   = UDim2.new(0, 1, 1, 0),
@@ -953,7 +1008,6 @@ function Library:Window(opts)
             Parent                 = Sidebar,
         })
 
-        -- Sidebar header
         local sideHeader = new("Frame", {
             Position               = UDim2.new(0, 0, 0, 0),
             Size                   = UDim2.new(1, 0, 0, 60),
@@ -964,7 +1018,7 @@ function Library:Window(opts)
             BackgroundTransparency = 1,
             Position               = UDim2.new(0, 16, 0, 18),
             Size                   = UDim2.new(1, -32, 0, 20),
-            Font                   = FONT_BOLD, TextSize = 14,
+            Font                   = FONT_BOLD, TextSize = ts(14),
             TextColor3             = theme.Foreground,
             Text                   = opts.Title or "MRC UI",
             TextXAlignment         = Enum.TextXAlignment.Left,
@@ -977,7 +1031,7 @@ function Library:Window(opts)
                 Position               = UDim2.new(0, 16, 0, 41),
                 Size                   = UDim2.new(0, 0, 0, 14),
                 AutomaticSize          = Enum.AutomaticSize.X,
-                Font                   = FONT_MED, TextSize = 10,
+                Font                   = FONT_MED, TextSize = ts(10),
                 TextColor3             = theme.Primary,
                 Text                   = " " .. opts.Version .. " ",
                 TextXAlignment         = Enum.TextXAlignment.Center,
@@ -991,14 +1045,13 @@ function Library:Window(opts)
             Position               = UDim2.new(0, 16, 1, -14),
             Size                   = UDim2.new(1, -32, 0, 13),
             BackgroundTransparency = 1,
-            Font                   = FONT_REG, TextSize = 10,
+            Font                   = FONT_REG, TextSize = ts(10),
             TextColor3             = theme.MutedForeground,
             Text                   = opts.FooterHint or "Right Ctrl · toggle",
             TextXAlignment         = Enum.TextXAlignment.Left,
             Parent                 = Sidebar,
         })
 
-        -- Scrollable tab list
         local SideScroll = new("ScrollingFrame", {
             Position               = UDim2.new(0, 0, 0, 70),
             Size                   = UDim2.new(1, 0, 1, -98),
@@ -1015,21 +1068,21 @@ function Library:Window(opts)
 
         -- ── Pages surface ─────────────────────────────────────────────────
         local Pages = new("Frame", {
-            Position               = UDim2.new(0, 180, 0, 0),
-            Size                   = UDim2.new(1, -180, 1, 0),
+            Position               = UDim2.new(0, SIDE_W, 0, 0),
+            Size                   = UDim2.new(1, -SIDE_W, 1, 0),
             BackgroundColor3       = theme.Surface,
             BackgroundTransparency = 0,
             BorderSizePixel        = 0,
             Parent                 = Root,
         })
 
-        -- ── Open icon (when window hidden) ────────────────────────────────
+        -- ── Open icon ─────────────────────────────────────────────────────
         local OpenIcon = new("TextButton", {
             Size             = UDim2.new(0, 36, 0, 36),
             Position         = UDim2.new(0, 12, 0, 12),
             BackgroundColor3 = theme.Primary,
             TextColor3       = theme.PrimaryForeground,
-            Font             = FONT_BOLD, TextSize = 18,
+            Font             = FONT_BOLD, TextSize = ts(18),
             Text             = "≡",
             AutoButtonColor  = false,
             Visible          = false,
@@ -1042,17 +1095,17 @@ function Library:Window(opts)
         minBtn.MouseButton1Click:Connect(function()
             minimized = not minimized
             if minimized then
-                tw(Root, TI_SLOW, { Size = UDim2.new(0, 180, 0, 60) })
+                tw(Root, TI_SLOW, { Size = UDim2.new(0, SIDE_W, 0, 60) })
             else
-                tw(Root, TI_SLOW, { Size = UDim2.new(0, 720, 0, 460) })
+                tw(Root, TI_SLOW, { Size = UDim2.new(0, WIN_W, 0, WIN_H) })
             end
         end)
         closeBtn.MouseButton1Click:Connect(function()
-            Root.Visible   = false
+            Root.Visible     = false
             OpenIcon.Visible = true
         end)
         OpenIcon.MouseButton1Click:Connect(function()
-            Root.Visible   = true
+            Root.Visible     = true
             OpenIcon.Visible = false
         end)
 
@@ -1068,9 +1121,9 @@ function Library:Window(opts)
         table.insert(Win._connections, rcConn)
 
         -- Intro animation
-        Root.Size                   = UDim2.new(0, 660, 0, 420)
+        Root.Size                   = UDim2.new(0, WIN_W - 60, 0, WIN_H - 40)
         Root.BackgroundTransparency = 1
-        tw(Root, TI_SLOW, { Size = UDim2.new(0, 720, 0, 460), BackgroundTransparency = 0 })
+        tw(Root, TI_SLOW, { Size = UDim2.new(0, WIN_W, 0, WIN_H), BackgroundTransparency = 0 })
 
         Win._themeUnreg = Library:OnThemeChanged(function(t)
             tw(Root,    TI, { BackgroundColor3 = t.Background })
@@ -1083,17 +1136,46 @@ function Library:Window(opts)
         -- Window methods
         -- ================================================================
         function Win:Destroy()
+            self._destroyed = true
             saveConfig(self)
             for _, unlisten in ipairs(self._connections) do unlisten() end
             if self._themeUnreg then self._themeUnreg() end
+            -- FIX #1: disconnect InputRouter global connections on destroy
+            for _, c in ipairs(_routerConns) do pcall(function() c:Disconnect() end) end
             Root:Destroy()
             OpenIcon:Destroy()
         end
 
         function Win:SetTitle(t) titleLbl.Text = t end
 
+        -- FIX #17: ExportConfig / ImportConfig
+        function Win:ExportConfig()
+            if self._destroyed then return nil end
+            local data = { __version = CONFIG_VERSION }
+            for flag, ref in pairs(Library.Flags) do
+                if ref._saveEnabled ~= false then
+                    local ok, val = pcall(function() return ref.Value end)
+                    if ok then data[flag] = val end
+                end
+            end
+            local ok, json = pcall(function() return HttpService:JSONEncode(data) end)
+            return ok and json or nil
+        end
+
+        function Win:ImportConfig(json)
+            if self._destroyed or type(json) ~= "string" then return false end
+            local ok, data = pcall(function() return HttpService:JSONDecode(json) end)
+            if not ok or type(data) ~= "table" then return false end
+            for flag, val in pairs(data) do
+                if flag ~= "__version" and Library.Flags[flag] then
+                    pcall(function() Library.Flags[flag]:Set(val) end)
+                end
+            end
+            return true
+        end
+
         -- ================================================================
-        -- TAB (factory, shared between user tabs and Credits)
+        -- TAB factory
         -- ================================================================
         local function buildTab(name)
             local Tab = { _win = Win }
@@ -1104,7 +1186,7 @@ function Library:Window(opts)
                 BackgroundTransparency = 1,
                 Text                   = name or "Tab",
                 TextXAlignment         = Enum.TextXAlignment.Left,
-                Font                   = FONT_MED, TextSize = 12,
+                Font                   = FONT_MED, TextSize = ts(12),
                 TextColor3             = theme.MutedForeground,
                 AutoButtonColor        = false,
                 Parent                 = SideScroll,
@@ -1112,7 +1194,6 @@ function Library:Window(opts)
             corner(TabBtn, R_SM)
             pad(TabBtn, nil, 14, 8, 0, 0)
 
-            -- Active indicator: left bar (cyan, visible only when active)
             local TabBar = new("Frame", {
                 Position               = UDim2.new(0, 0, 0.5, -10),
                 Size                   = UDim2.new(0, 3, 0, 20),
@@ -1144,7 +1225,6 @@ function Library:Window(opts)
             listL(Page, 10)
             pad(Page, nil, 20, 20, 16, 16)
 
-            -- Scroll-fade at bottom
             new("UIGradient", {
                 Transparency = NumberSequence.new{
                     NumberSequenceKeypoint.new(0,    0),
@@ -1155,13 +1235,18 @@ function Library:Window(opts)
                 Parent   = Page,
             })
 
-            Tab._page     = Page
-            Tab._btn      = TabBtn
-            Tab._bar      = TabBar
-            Tab._isActive = false
+            Tab._page       = Page
+            Tab._btn        = TabBtn
+            Tab._bar        = TabBar
+            Tab._isActive   = false
+            Tab._scrollPos  = Vector2.new(0, 0) -- FIX #12: save scroll
 
             local function activate()
                 for _, t in ipairs(Win.Tabs) do
+                    -- FIX #12: save scroll before hiding
+                    if t._isActive then
+                        t._scrollPos = t._page.CanvasPosition
+                    end
                     t._page.Visible = false
                     t._isActive     = false
                     tw(t._btn, TI_Q, {
@@ -1173,6 +1258,8 @@ function Library:Window(opts)
                 Page.Visible  = true
                 _isActive     = true
                 Tab._isActive = true
+                -- FIX #12: restore scroll position
+                Page.CanvasPosition = Tab._scrollPos
                 tw(TabBtn, TI_Q, {
                     BackgroundColor3       = theme.SurfaceElevated,
                     BackgroundTransparency = 0,
@@ -1215,7 +1302,7 @@ function Library:Window(opts)
                             Size                   = UDim2.new(1, 0, 0, itemH),
                             BackgroundTransparency = 1,
                             BackgroundColor3       = theme.Card,
-                            Font                   = FONT_MED, TextSize = 12,
+                            Font                   = FONT_MED, TextSize = ts(12),
                             TextColor3             = theme.Foreground,
                             TextXAlignment         = Enum.TextXAlignment.Left,
                             Text = "  " .. (item.Icon and (item.Icon .. "  ") or "") .. (item.Label or ""),
@@ -1241,9 +1328,6 @@ function Library:Window(opts)
 
             -- ============================================================
             -- SECTION
-            --   WHY CHANGE: removed the bright cyan left pip; sections now
-            --   use only the muted uppercase label — cleaner visual hierarchy,
-            --   cyan reserved for interactive elements only.
             -- ============================================================
             function Tab:Section(name)
                 local container = new("Frame", {
@@ -1255,7 +1339,7 @@ function Library:Window(opts)
                     BackgroundTransparency = 1,
                     Position               = UDim2.new(0, 2, 0, 0),
                     Size                   = UDim2.new(1, -2, 1, 0),
-                    Font                   = FONT_MED, TextSize = 10,
+                    Font                   = FONT_MED, TextSize = ts(10),
                     TextColor3             = theme.MutedForeground,
                     TextXAlignment         = Enum.TextXAlignment.Left,
                     Text                   = string.upper(name or "Section"),
@@ -1267,21 +1351,74 @@ function Library:Window(opts)
                 }
             end
 
+            -- FIX #7: labeled divider
+            function Tab:LabeledDivider(text)
+                local container = new("Frame", {
+                    BackgroundTransparency = 1,
+                    Size                   = UDim2.new(1, 0, 0, 18),
+                    Parent                 = Page,
+                })
+                -- left line
+                new("Frame", {
+                    AnchorPoint            = Vector2.new(0, 0.5),
+                    Position               = UDim2.new(0, 0, 0.5, 0),
+                    Size                   = UDim2.new(0.35, -6, 0, 1),
+                    BackgroundColor3       = theme.Border,
+                    BackgroundTransparency = 0.82,
+                    BorderSizePixel        = 0,
+                    Parent                 = container,
+                })
+                new("TextLabel", {
+                    AnchorPoint            = Vector2.new(0.5, 0.5),
+                    Position               = UDim2.new(0.5, 0, 0.5, 0),
+                    Size                   = UDim2.new(0.3, 0, 1, 0),
+                    BackgroundTransparency = 1,
+                    Font                   = FONT_MED, TextSize = ts(10),
+                    TextColor3             = theme.MutedForeground,
+                    Text                   = text or "",
+                    Parent                 = container,
+                })
+                -- right line
+                new("Frame", {
+                    AnchorPoint            = Vector2.new(1, 0.5),
+                    Position               = UDim2.new(1, 0, 0.5, 0),
+                    Size                   = UDim2.new(0.35, -6, 0, 1),
+                    BackgroundColor3       = theme.Border,
+                    BackgroundTransparency = 0.82,
+                    BorderSizePixel        = 0,
+                    Parent                 = container,
+                })
+                return { Remove = function() container:Destroy() end }
+            end
+
             -- ============================================================
-            -- BUTTON
-            --   WHY CHANGE: removed the left hover bar (cyan vertical line);
-            --   hover state now expressed entirely through card bg + chip.
+            -- BUTTON  — FIX #20: optional Icon param
             -- ============================================================
             function Tab:Button(opts2)
                 opts2 = opts2 or {}
                 local f = card(52)
 
+                local labelX = opts2.Icon and 40 or 16
+
+                if opts2.Icon then
+                    new("TextLabel", {
+                        BackgroundTransparency = 1,
+                        AnchorPoint            = Vector2.new(0, 0.5),
+                        Position               = UDim2.new(0, 14, 0.5, 0),
+                        Size                   = UDim2.new(0, 22, 0, 22),
+                        Font                   = FONT_REG, TextSize = ts(16),
+                        TextColor3             = theme.Primary,
+                        Text                   = opts2.Icon,
+                        Parent                 = f,
+                    })
+                end
+
                 local lbl = new("TextLabel", {
                     BackgroundTransparency = 1,
                     AnchorPoint            = Vector2.new(0, 0.5),
-                    Position               = UDim2.new(0, 16, 0.5, 0),
-                    Size                   = UDim2.new(1, -60, 0, 16),
-                    Font                   = FONT_MED, TextSize = 13,
+                    Position               = UDim2.new(0, labelX, 0.5, 0),
+                    Size                   = UDim2.new(1, -(labelX + 44), 0, 16),
+                    Font                   = FONT_MED, TextSize = ts(13),
                     TextColor3             = theme.Foreground,
                     TextXAlignment         = Enum.TextXAlignment.Left,
                     Text                   = opts2.Label or "Button",
@@ -1290,13 +1427,13 @@ function Library:Window(opts)
 
                 if opts2.Description then
                     lbl.AnchorPoint = Vector2.new(0, 0)
-                    lbl.Position    = UDim2.new(0, 16, 0, 10)
-                    lbl.Size        = UDim2.new(1, -60, 0, 16)
+                    lbl.Position    = UDim2.new(0, labelX, 0, 10)
+                    lbl.Size        = UDim2.new(1, -(labelX + 44), 0, 16)
                     new("TextLabel", {
                         BackgroundTransparency = 1,
-                        Position               = UDim2.new(0, 16, 0, 29),
-                        Size                   = UDim2.new(1, -60, 0, 13),
-                        Font                   = FONT_REG, TextSize = 11,
+                        Position               = UDim2.new(0, labelX, 0, 29),
+                        Size                   = UDim2.new(1, -(labelX + 44), 0, 13),
+                        Font                   = FONT_REG, TextSize = ts(11),
                         TextColor3             = theme.MutedForeground,
                         TextXAlignment         = Enum.TextXAlignment.Left,
                         Text                   = opts2.Description,
@@ -1305,7 +1442,6 @@ function Library:Window(opts)
                     f.Size = UDim2.new(1, 0, 0, 56)
                 end
 
-                -- Right chip: shows ▸ icon, fills Primary on hover
                 local chip = new("Frame", {
                     AnchorPoint      = Vector2.new(1, 0.5),
                     Position         = UDim2.new(1, -12, 0.5, 0),
@@ -1318,7 +1454,7 @@ function Library:Window(opts)
                 new("TextLabel", {
                     BackgroundTransparency = 1,
                     Size                   = UDim2.new(1, 0, 1, 0),
-                    Font                   = FONT_BOLD, TextSize = 13,
+                    Font                   = FONT_BOLD, TextSize = ts(13),
                     TextColor3             = theme.Primary,
                     Text                   = "▸",
                     Parent                 = chip,
@@ -1370,7 +1506,7 @@ function Library:Window(opts)
                     BackgroundTransparency = 1,
                     AnchorPoint            = Vector2.new(0, 0.5),
                     Size                   = UDim2.new(1, 0, 1, 0),
-                    Font                   = FONT_REG, TextSize = 13,
+                    Font                   = FONT_REG, TextSize = ts(13),
                     TextColor3             = theme.Foreground,
                     TextXAlignment         = Enum.TextXAlignment.Left,
                     Text                   = text or "Label",
@@ -1395,7 +1531,7 @@ function Library:Window(opts)
                 local title = new("TextLabel", {
                     BackgroundTransparency = 1,
                     Size                   = UDim2.new(1, 0, 0, 18),
-                    Font                   = FONT_MED, TextSize = 13,
+                    Font                   = FONT_MED, TextSize = ts(13),
                     TextColor3             = theme.Foreground,
                     TextXAlignment         = Enum.TextXAlignment.Left,
                     Text                   = opts2.Title or "Title",
@@ -1405,7 +1541,7 @@ function Library:Window(opts)
                     BackgroundTransparency = 1,
                     Size                   = UDim2.new(1, 0, 0, 0),
                     AutomaticSize          = Enum.AutomaticSize.Y,
-                    Font                   = FONT_REG, TextSize = 12,
+                    Font                   = FONT_REG, TextSize = ts(12),
                     TextColor3             = theme.MutedForeground,
                     TextWrapped            = true,
                     TextXAlignment         = Enum.TextXAlignment.Left,
@@ -1438,26 +1574,20 @@ function Library:Window(opts)
             end
 
             -- ============================================================
-            -- TOGGLE  — FULL REDESIGN
-            --   WHY: Old knob sat on an irregular square track. New design:
-            --     • 44×22 pill track (R_PILL on both ends)
-            --     • 16×16 knob (R_PILL) slides with Back easing for tactile feel
-            --     • OFF state: muted grey track so knob is always legible
-            --     • ON state: Primary fill + a soft 20% transparent glow halo
-            --       behind the track for depth (no game-level glow API needed)
-            --     • Knob stroke removed — cleaner inside the pill
+            -- TOGGLE  — FIX #9: SetEnabled greys track
             -- ============================================================
             function Tab:Toggle(opts2)
                 opts2 = opts2 or {}
-                local state = opts2.Default or false
-                local f     = card(opts2.Description and 56 or 52)
+                local state   = opts2.Default or false
+                local enabled = true
+                local f       = card(opts2.Description and 56 or 52)
 
                 local lbl = new("TextLabel", {
                     BackgroundTransparency = 1,
                     AnchorPoint            = Vector2.new(0, 0.5),
                     Position               = UDim2.new(0, 16, 0.5, 0),
                     Size                   = UDim2.new(1, -76, 0, 16),
-                    Font                   = FONT_MED, TextSize = 13,
+                    Font                   = FONT_MED, TextSize = ts(13),
                     TextColor3             = theme.Foreground,
                     TextXAlignment         = Enum.TextXAlignment.Left,
                     Text                   = opts2.Label or "Toggle",
@@ -1471,7 +1601,7 @@ function Library:Window(opts)
                         BackgroundTransparency = 1,
                         Position               = UDim2.new(0, 16, 0, 30),
                         Size                   = UDim2.new(1, -76, 0, 13),
-                        Font                   = FONT_REG, TextSize = 11,
+                        Font                   = FONT_REG, TextSize = ts(11),
                         TextColor3             = theme.MutedForeground,
                         TextXAlignment         = Enum.TextXAlignment.Left,
                         Text                   = opts2.Description,
@@ -1479,31 +1609,27 @@ function Library:Window(opts)
                     })
                 end
 
-                -- Glow halo behind track (slightly larger, semi-transparent)
-                --   gives the ON state a subtle depth without a harsh glow
                 local glow = new("Frame", {
-                    AnchorPoint      = Vector2.new(1, 0.5),
-                    Position         = UDim2.new(1, -12, 0.5, 0),
-                    Size             = UDim2.new(0, 50, 0, 30),
-                    BackgroundColor3 = theme.Primary,
-                    BackgroundTransparency = 1,   -- hidden when OFF
-                    BorderSizePixel  = 0,
-                    Parent           = f,
+                    AnchorPoint            = Vector2.new(1, 0.5),
+                    Position               = UDim2.new(1, -12, 0.5, 0),
+                    Size                   = UDim2.new(0, 50, 0, 30),
+                    BackgroundColor3       = theme.Primary,
+                    BackgroundTransparency = 1,
+                    BorderSizePixel        = 0,
+                    Parent                 = f,
                 })
                 corner(glow, R_PILL)
 
-                -- Track: 44×22 true pill
                 local track = new("Frame", {
                     AnchorPoint      = Vector2.new(1, 0.5),
                     Position         = UDim2.new(1, -14, 0.5, 0),
                     Size             = UDim2.new(0, 44, 0, 22),
-                    BackgroundColor3 = Color3.fromRGB(38, 50, 64),  -- OFF: visible neutral grey
+                    BackgroundColor3 = Color3.fromRGB(38, 50, 64),
                     BorderSizePixel  = 0,
                     Parent           = f,
                 })
                 corner(track, R_PILL)
 
-                -- Knob: 16×16 pure white pill, rides inside the track
                 local knob = new("Frame", {
                     Position         = UDim2.new(0, 3, 0.5, -8),
                     Size             = UDim2.new(0, 16, 0, 16),
@@ -1519,37 +1645,64 @@ function Library:Window(opts)
                 api._saveEnabled = opts2.Save ~= false
                 api.Value        = state
 
+                local DISABLED_TRACK = Color3.fromRGB(28, 36, 44)
+
                 local function render(animated)
-                    local twFn = animated ~= false and function(o, i, p) tw(o, i, p) end
-                                 or function(o, _, p)
-                                        for k, v in pairs(p) do o[k] = v end
-                                    end
+                    local twFn = animated ~= false
+                        and function(o, i, p) tw(o, i, p) end
+                        or  function(o, _, p) for k, v in pairs(p) do o[k] = v end end
+
+                    if not enabled then
+                        twFn(track, TI_Q, { BackgroundColor3 = DISABLED_TRACK })
+                        twFn(knob,  TI_Q, { BackgroundColor3 = Color3.fromRGB(80, 90, 100) })
+                        twFn(glow,  TI_Q, { BackgroundTransparency = 1 })
+                        return
+                    end
+
                     if state then
-                        twFn(track, TI_Q,    { BackgroundColor3 = theme.Primary })
+                        twFn(track, TI_Q,     { BackgroundColor3 = theme.Primary })
                         twFn(knob,  TI_SPRING, { Position = UDim2.new(1, -19, 0.5, -8) })
-                        twFn(glow,  TI_Q,    { BackgroundTransparency = 0.80 })
+                        twFn(knob,  TI_Q,     { BackgroundColor3 = Color3.fromRGB(255, 255, 255) })
+                        twFn(glow,  TI_Q,     { BackgroundTransparency = 0.80 })
                     else
-                        twFn(track, TI_Q,    { BackgroundColor3 = Color3.fromRGB(38, 50, 64) })
+                        twFn(track, TI_Q,     { BackgroundColor3 = Color3.fromRGB(38, 50, 64) })
                         twFn(knob,  TI_SPRING, { Position = UDim2.new(0, 3, 0.5, -8) })
-                        twFn(glow,  TI_Q,    { BackgroundTransparency = 1 })
+                        twFn(knob,  TI_Q,     { BackgroundColor3 = Color3.fromRGB(255, 255, 255) })
+                        twFn(glow,  TI_Q,     { BackgroundTransparency = 1 })
                     end
                 end
                 render(false)
 
                 function api:Set(v)
+                    if not enabled then return end
                     state     = v and true or false
                     api.Value = state
                     render(true)
                     changed:Fire(state)
                     Win._debouncedSave()
                 end
+
+                -- FIX #9: SetEnabled visually greys the track
+                function api:SetEnabled(v)
+                    enabled = v and true or false
+                    render(true)
+                    local btn_ = f:FindFirstChildWhichIsA("TextButton")
+                    if btn_ then btn_.Active = enabled end
+                    tw(lbl, TI_Q, { TextTransparency = enabled and 0 or 0.5 })
+                    return self
+                end
+
                 function api:OnChanged(fn) return changed:Connect(safeCallback(fn, notifyFn)) end
 
                 local btn = new("TextButton", {
-                    Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1,
-                    Text = "", Parent = f,
+                    Size                   = UDim2.new(1, 0, 1, 0),
+                    BackgroundTransparency = 1,
+                    Text                   = "",
+                    Parent                 = f,
                 })
-                btn.MouseButton1Click:Connect(function() api:Set(not state) end)
+                btn.MouseButton1Click:Connect(function()
+                    if enabled then api:Set(not state) end
+                end)
 
                 if opts2.ContextMenu then attachCtx(f, opts2.ContextMenu) end
                 if opts2.Flag then Library.Flags[opts2.Flag] = api end
@@ -1560,22 +1713,22 @@ function Library:Window(opts)
             end
 
             -- ============================================================
-            -- SLIDER
+            -- SLIDER  — FIX #2 (removed _G), FIX #6 (arrow key support)
             -- ============================================================
             function Tab:Slider(opts2)
                 opts2 = opts2 or {}
-                local min    = opts2.Range and opts2.Range[1] or 0
-                local max    = opts2.Range and opts2.Range[2] or 100
+                local min_v  = opts2.Range and opts2.Range[1] or 0
+                local max_v  = opts2.Range and opts2.Range[2] or 100
                 local inc    = opts2.Increment or 1
                 local suffix = opts2.Suffix or ""
-                local val    = opts2.Default or min
+                local val    = opts2.Default or min_v
                 local f      = card(62)
 
                 new("TextLabel", {
                     BackgroundTransparency = 1,
                     Position               = UDim2.new(0, 16, 0, 12),
                     Size                   = UDim2.new(1, -100, 0, 16),
-                    Font                   = FONT_MED, TextSize = 13,
+                    Font                   = FONT_MED, TextSize = ts(13),
                     TextColor3             = theme.Foreground,
                     TextXAlignment         = Enum.TextXAlignment.Left,
                     Text                   = opts2.Label or "Slider",
@@ -1585,7 +1738,7 @@ function Library:Window(opts)
                     BackgroundTransparency = 1,
                     Position               = UDim2.new(1, -80, 0, 12),
                     Size                   = UDim2.new(0, 68, 0, 16),
-                    Font                   = FONT_MED, TextSize = 12,
+                    Font                   = FONT_MED, TextSize = ts(12),
                     TextColor3             = theme.Primary,
                     TextXAlignment         = Enum.TextXAlignment.Right,
                     Text                   = tostring(val) .. suffix,
@@ -1601,7 +1754,7 @@ function Library:Window(opts)
                 })
                 corner(track, 3)
                 local fill = new("Frame", {
-                    Size             = UDim2.new((val - min) / (max - min), 0, 1, 0),
+                    Size             = UDim2.new((val - min_v) / (max_v - min_v), 0, 1, 0),
                     BackgroundColor3 = theme.Primary,
                     BorderSizePixel  = 0,
                     Parent           = track,
@@ -1610,7 +1763,7 @@ function Library:Window(opts)
 
                 local thumb = new("Frame", {
                     AnchorPoint      = Vector2.new(0.5, 0.5),
-                    Position         = UDim2.new((val - min) / (max - min), 0, 0.5, 0),
+                    Position         = UDim2.new((val - min_v) / (max_v - min_v), 0, 0.5, 0),
                     Size             = UDim2.new(0, 12, 0, 12),
                     BackgroundColor3 = Color3.fromRGB(255, 255, 255),
                     BorderSizePixel  = 0,
@@ -1620,6 +1773,7 @@ function Library:Window(opts)
                 corner(thumb, R_PILL)
                 stroke(thumb, Color3.fromRGB(0, 0, 0), 1, 0.86)
 
+                -- Invisible hit area that also captures keyboard focus
                 local hitArea = new("TextButton", {
                     Position               = UDim2.new(0, 16, 1, -34),
                     Size                   = UDim2.new(1, -32, 0, 28),
@@ -1628,42 +1782,90 @@ function Library:Window(opts)
                     Parent                 = f,
                     ZIndex                 = f.ZIndex + 1,
                 })
-                hitArea.MouseEnter:Connect(function() tw(thumb, TI_Q, { Size = UDim2.new(0, 16, 0, 16) }) end)
+                hitArea.MouseEnter:Connect(function()
+                    tw(thumb, TI_Q, { Size = UDim2.new(0, 16, 0, 16) })
+                end)
                 hitArea.MouseLeave:Connect(function()
-                    if not _G["_mrcSliderDrag_" .. tostring(track)] then
+                    -- FIX #2: no longer uses _G — just check local dragging below
+                end)
+
+                local changed = Signal.new()
+                local api     = {}
+                api._saveEnabled = opts2.Save ~= false
+                api.Value        = val
+
+                local dragging = false -- FIX #2: this was already local; dead _G ref removed
+
+                local function setAlpha(a)
+                    a   = math.clamp(a, 0, 1)
+                    local raw = min_v + (max_v - min_v) * a
+                    raw = math.floor((raw / inc) + 0.5) * inc
+                    raw = math.clamp(raw, min_v, max_v)
+                    val            = raw
+                    api.Value      = val
+                    valLbl.Text    = tostring(val) .. suffix
+                    fill.Size      = UDim2.new((val - min_v) / (max_v - min_v), 0, 1, 0)
+                    thumb.Position = UDim2.new((val - min_v) / (max_v - min_v), 0, 0.5, 0)
+                    changed:Fire(val)
+                end
+
+                hitArea.MouseLeave:Connect(function()
+                    if not dragging then
                         tw(thumb, TI_Q, { Size = UDim2.new(0, 12, 0, 12) })
                     end
                 end)
 
-                local changed  = Signal.new()
-                local api      = {}
-                api._saveEnabled = opts2.Save ~= false
-                api.Value        = val
+                -- FIX #6: arrow key support
+                local focused = false
+                hitArea.MouseButton1Click:Connect(function()
+                    focused = true
+                    tw(thumb, TI_Q, { Size = UDim2.new(0, 16, 0, 16) })
+                end)
 
-                local dragging = false
-                local function setAlpha(a)
-                    a   = math.clamp(a, 0, 1)
-                    local raw = min + (max - min) * a
-                    raw = math.floor((raw / inc) + 0.5) * inc
-                    raw = math.clamp(raw, min, max)
-                    val            = raw
-                    api.Value      = val
-                    valLbl.Text    = tostring(val) .. suffix
-                    fill.Size      = UDim2.new((val - min) / (max - min), 0, 1, 0)
-                    thumb.Position = UDim2.new((val - min) / (max - min), 0, 0.5, 0)
-                    changed:Fire(val)
-                end
+                local arrowConn = routerListen("_began", function(input, gp)
+                    if not focused or gp then return end
+                    if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+                    local step = inc / (max_v - min_v)
+                    if input.KeyCode == Enum.KeyCode.Right or input.KeyCode == Enum.KeyCode.D then
+                        setAlpha((val - min_v) / (max_v - min_v) + step)
+                        Win._debouncedSave()
+                    elseif input.KeyCode == Enum.KeyCode.Left or input.KeyCode == Enum.KeyCode.A then
+                        setAlpha((val - min_v) / (max_v - min_v) - step)
+                        Win._debouncedSave()
+                    elseif input.KeyCode == Enum.KeyCode.Escape then
+                        focused = false
+                        tw(thumb, TI_Q, { Size = UDim2.new(0, 12, 0, 12) })
+                    end
+                end)
+                table.insert(Win._connections, arrowConn)
+
+                -- defocus on click elsewhere
+                local defocusConn = routerListen("_began", function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 and focused then
+                        local ap = hitArea.AbsolutePosition
+                        local sz = hitArea.AbsoluteSize
+                        local mp = input.Position
+                        if not (mp.X >= ap.X and mp.X <= ap.X + sz.X
+                             and mp.Y >= ap.Y and mp.Y <= ap.Y + sz.Y) then
+                            focused = false
+                            if not dragging then
+                                tw(thumb, TI_Q, { Size = UDim2.new(0, 12, 0, 12) })
+                            end
+                        end
+                    end
+                end)
+                table.insert(Win._connections, defocusConn)
 
                 local uL1 = routerListen("_began", function(input)
                     if input.UserInputType ~= Enum.UserInputType.MouseButton1
                     and input.UserInputType ~= Enum.UserInputType.Touch then return end
-                    local tp = track.AbsolutePosition; local ts = track.AbsoluteSize
+                    local tp = track.AbsolutePosition; local ts_ = track.AbsoluteSize
                     local mp = input.Position
-                    if mp.X >= tp.X - 8 and mp.X <= tp.X + ts.X + 8
-                    and mp.Y >= tp.Y - 12 and mp.Y <= tp.Y + ts.Y + 12 then
+                    if mp.X >= tp.X - 8 and mp.X <= tp.X + ts_.X + 8
+                    and mp.Y >= tp.Y - 12 and mp.Y <= tp.Y + ts_.Y + 12 then
                         dragging = true
                         tw(thumb, TI_Q, { Size = UDim2.new(0, 16, 0, 16) })
-                        setAlpha((mp.X - tp.X) / ts.X)
+                        setAlpha((mp.X - tp.X) / ts_.X)
                     end
                 end)
                 local uL2 = routerListen("_ended", function(input)
@@ -1686,7 +1888,7 @@ function Library:Window(opts)
                 table.insert(Win._connections, uL2)
                 table.insert(Win._connections, uL3)
 
-                function api:Set(v) setAlpha((v - min) / (max - min)) end
+                function api:Set(v) setAlpha((v - min_v) / (max_v - min_v)) end
                 function api:OnChanged(fn) return changed:Connect(safeCallback(fn, notifyFn)) end
                 if opts2.Flag then Library.Flags[opts2.Flag] = api end
                 if Win._pendingConfig and opts2.Flag and Win._pendingConfig[opts2.Flag] ~= nil then
@@ -1696,7 +1898,7 @@ function Library:Window(opts)
             end
 
             -- ============================================================
-            -- INPUT
+            -- INPUT  — FIX #8: MaxLength option
             -- ============================================================
             function Tab:Input(opts2)
                 opts2 = opts2 or {}
@@ -1706,7 +1908,7 @@ function Library:Window(opts)
                     BackgroundTransparency = 1,
                     Position               = UDim2.new(0, 16, 0, 10),
                     Size                   = UDim2.new(1, -32, 0, 14),
-                    Font                   = FONT_MED, TextSize = 11,
+                    Font                   = FONT_MED, TextSize = ts(11),
                     TextColor3             = theme.MutedForeground,
                     TextXAlignment         = Enum.TextXAlignment.Left,
                     Text                   = opts2.Label or "Input",
@@ -1717,7 +1919,7 @@ function Library:Window(opts)
                     Position          = UDim2.new(0, 16, 0, 28),
                     Size              = UDim2.new(1, -32, 0, 28),
                     BackgroundColor3  = Color3.fromRGB(12, 19, 26),
-                    Font              = FONT_REG, TextSize = 13,
+                    Font              = FONT_REG, TextSize = ts(13),
                     TextColor3        = theme.Foreground,
                     PlaceholderText   = opts2.Placeholder or "…",
                     PlaceholderColor3 = theme.MutedForeground,
@@ -1729,6 +1931,16 @@ function Library:Window(opts)
                 corner(box, R_SM)
                 pad(box, nil, 10, 10, 0, 0)
                 local boxStroke = stroke(box, theme.Border, 1, 0.92)
+
+                -- FIX #8: apply MaxLength
+                if opts2.MaxLength then
+                    box.MaxVisibleGraphemes = opts2.MaxLength
+                    box:GetPropertyChangedSignal("Text"):Connect(function()
+                        if #box.Text > opts2.MaxLength then
+                            box.Text = box.Text:sub(1, opts2.MaxLength)
+                        end
+                    end)
+                end
 
                 box.Focused:Connect(function()
                     tw(boxStroke, TI_Q, { Color = theme.Primary, Transparency = 0.5 })
@@ -1757,6 +1969,10 @@ function Library:Window(opts)
                 if Win._pendingConfig and opts2.Flag and Win._pendingConfig[opts2.Flag] ~= nil then
                     api:Set(Win._pendingConfig[opts2.Flag])
                 end
+                -- FIX #16: clear pending config entry after apply
+                if Win._pendingConfig and opts2.Flag then
+                    Win._pendingConfig[opts2.Flag] = nil
+                end
                 return decorate(api, f, opts2)
             end
 
@@ -1773,7 +1989,7 @@ function Library:Window(opts)
                     AnchorPoint            = Vector2.new(0, 0.5),
                     Position               = UDim2.new(0, 16, 0.5, 0),
                     Size                   = UDim2.new(1, -90, 0, 16),
-                    Font                   = FONT_MED, TextSize = 13,
+                    Font                   = FONT_MED, TextSize = ts(13),
                     TextColor3             = theme.Foreground,
                     TextXAlignment         = Enum.TextXAlignment.Left,
                     Text                   = opts2.Label or "Keybind",
@@ -1786,7 +2002,7 @@ function Library:Window(opts)
                     Size             = UDim2.new(0, 64, 0, 26),
                     BackgroundColor3 = theme.SurfaceElevated,
                     TextColor3       = theme.Foreground,
-                    Font             = FONT_MED, TextSize = 11,
+                    Font             = FONT_MED, TextSize = ts(11),
                     Text             = tostring(current),
                     AutoButtonColor  = false,
                     BorderSizePixel  = 0,
@@ -1831,7 +2047,7 @@ function Library:Window(opts)
             end
 
             -- ============================================================
-            -- DROPDOWN  (with search)
+            -- DROPDOWN  — FIX #5 (outside click), FIX #11 (chevron rotate)
             -- ============================================================
             function Tab:Dropdown(opts2)
                 opts2 = opts2 or {}
@@ -1846,7 +2062,7 @@ function Library:Window(opts)
                     AnchorPoint            = Vector2.new(0, 0.5),
                     Position               = UDim2.new(0, 16, 0.5, 0),
                     Size                   = UDim2.new(1, -180, 0, 16),
-                    Font                   = FONT_MED, TextSize = 13,
+                    Font                   = FONT_MED, TextSize = ts(13),
                     TextColor3             = theme.Foreground,
                     TextXAlignment         = Enum.TextXAlignment.Left,
                     Text                   = opts2.Label or "Dropdown",
@@ -1858,7 +2074,7 @@ function Library:Window(opts)
                     Position         = UDim2.new(1, -14, 0.5, 0),
                     Size             = UDim2.new(0, 155, 0, 28),
                     BackgroundColor3 = theme.SurfaceElevated,
-                    Font             = FONT_MED, TextSize = 12,
+                    Font             = FONT_MED, TextSize = ts(12),
                     TextColor3       = theme.Foreground,
                     AutoButtonColor  = false,
                     BorderSizePixel  = 0,
@@ -1869,14 +2085,16 @@ function Library:Window(opts)
                 pad(valBtn, nil, 10, 24, 0, 0)
                 valBtn.TextXAlignment = Enum.TextXAlignment.Left
 
-                new("TextLabel", {
+                -- FIX #11: chevron that we can rotate
+                local chevron = new("TextLabel", {
                     AnchorPoint            = Vector2.new(1, 0.5),
                     Position               = UDim2.new(1, -8, 0.5, 0),
                     Size                   = UDim2.new(0, 12, 0, 12),
                     BackgroundTransparency = 1,
-                    Font                   = FONT_MED, TextSize = 12,
+                    Font                   = FONT_MED, TextSize = ts(12),
                     TextColor3             = theme.MutedForeground,
                     Text                   = "▾",
+                    Rotation               = 0,
                     Parent                 = valBtn,
                 })
 
@@ -1884,7 +2102,7 @@ function Library:Window(opts)
                     Position          = UDim2.new(0, 16, 0, 58),
                     Size              = UDim2.new(1, -32, 0, 26),
                     BackgroundColor3  = theme.SurfaceElevated,
-                    Font              = FONT_REG, TextSize = 12,
+                    Font              = FONT_REG, TextSize = ts(12),
                     TextColor3        = theme.Foreground,
                     PlaceholderText   = "Search…",
                     PlaceholderColor3 = theme.MutedForeground,
@@ -1928,8 +2146,13 @@ function Library:Window(opts)
                 end
 
                 local opened = false
+
                 local function close()
                     opened = false
+                    -- FIX #5: clear module-level open tracker
+                    if _openDropdown == close then _openDropdown = nil end
+                    -- FIX #11: rotate chevron back
+                    tw(chevron,   TI_Q, { Rotation = 0 })
                     tw(f,         TI_Q, { Size = UDim2.new(1, 0, 0, 52) })
                     tw(list,      TI_Q, { Size = UDim2.new(1, -32, 0, 0) })
                     tw(searchBox, TI_Q, { BackgroundTransparency = 1 })
@@ -1950,7 +2173,7 @@ function Library:Window(opts)
                                 Size                   = UDim2.new(1, 0, 0, 28),
                                 BackgroundTransparency = 1,
                                 BackgroundColor3       = theme.Card,
-                                Font                   = FONT_REG, TextSize = 12,
+                                Font                   = FONT_REG, TextSize = ts(12),
                                 TextColor3             = theme.Foreground,
                                 TextXAlignment         = Enum.TextXAlignment.Left,
                                 Text                   = "  " .. optStr,
@@ -1964,7 +2187,9 @@ function Library:Window(opts)
                                 if multi then
                                     current = type(current) == "table" and current or {}
                                     local found
-                                    for i, v in ipairs(current) do if v == opt then found = i; break end end
+                                    for i, v in ipairs(current) do
+                                        if v == opt then found = i; break end
+                                    end
                                     if found then table.remove(current, found)
                                     else table.insert(current, opt) end
                                 else current = opt; close() end
@@ -1982,6 +2207,13 @@ function Library:Window(opts)
                 valBtn.MouseButton1Click:Connect(function()
                     opened = not opened
                     if opened then
+                        -- FIX #5: close previous open dropdown
+                        if _openDropdown and _openDropdown ~= close then
+                            _openDropdown()
+                        end
+                        _openDropdown = close
+                        -- FIX #11: rotate chevron open
+                        tw(chevron, TI_Q, { Rotation = 180 })
                         local count = rebuild(searchBox.Text)
                         local listH = math.min(count * 28 + 8, 168)
                         tw(f,         TI_Q, { Size = UDim2.new(1, 0, 0, 96 + listH) })
@@ -2002,9 +2234,9 @@ function Library:Window(opts)
                     current = v; api.Value = v; valBtn.Text = labelText()
                 end
                 function api:Refresh(newOpts, keep)
-                    options   = newOpts or {}
+                    options = newOpts or {}
                     if not keep then current = multi and {} or options[1] end
-                    api.Value   = current; valBtn.Text = labelText(); rebuild()
+                    api.Value = current; valBtn.Text = labelText(); rebuild()
                 end
                 function api:OnChanged(fn) return changed:Connect(safeCallback(fn, notifyFn)) end
                 if opts2.Flag then Library.Flags[opts2.Flag] = api end
@@ -2015,7 +2247,7 @@ function Library:Window(opts)
             end
 
             -- ============================================================
-            -- COLOR PICKER
+            -- COLOR PICKER  — FIX #13: live hex + red on bad input
             -- ============================================================
             function Tab:ColorPicker(opts2)
                 opts2 = opts2 or {}
@@ -2029,7 +2261,7 @@ function Library:Window(opts)
                     AnchorPoint            = Vector2.new(0, 0.5),
                     Position               = UDim2.new(0, 14, 0.5, 0),
                     Size                   = UDim2.new(1, -60, 0, 16),
-                    Font                   = FONT_MED, TextSize = 13,
+                    Font                   = FONT_MED, TextSize = ts(13),
                     TextColor3             = theme.Foreground,
                     TextXAlignment         = Enum.TextXAlignment.Left,
                     Text                   = opts2.Label or "Color",
@@ -2142,7 +2374,7 @@ function Library:Window(opts)
                 new("TextLabel", {
                     BackgroundTransparency = 1,
                     Size                   = UDim2.new(0, 28, 1, 0),
-                    Font                   = FONT_MED, TextSize = 11,
+                    Font                   = FONT_MED, TextSize = ts(11),
                     TextColor3             = theme.MutedForeground,
                     Text                   = "HEX",
                     Parent                 = hexRow,
@@ -2151,7 +2383,7 @@ function Library:Window(opts)
                     Position          = UDim2.new(0, 32, 0, 0),
                     Size              = UDim2.new(1, -32, 1, 0),
                     BackgroundColor3  = theme.SurfaceElevated,
-                    Font              = FONT_MED, TextSize = 12,
+                    Font              = FONT_MED, TextSize = ts(12),
                     TextColor3        = theme.Foreground,
                     ClearTextOnFocus  = false, Text = "",
                     Parent            = hexRow,
@@ -2173,8 +2405,10 @@ function Library:Window(opts)
 
                 local function toHex(c)
                     return string.format("#%02X%02X%02X",
-                        math.floor(c.R*255), math.floor(c.G*255), math.floor(c.B*255))
+                        math.floor(c.R * 255), math.floor(c.G * 255), math.floor(c.B * 255))
                 end
+
+                local _suppressHex = false
                 local function commit()
                     color     = hsvToColor(h, s, v)
                     api.Value = color
@@ -2182,11 +2416,69 @@ function Library:Window(opts)
                     svSquare.BackgroundColor3 = hsvToColor(h, 1, 1)
                     svCursor.Position         = UDim2.new(s, 0, 1 - v, 0)
                     hueCursor.Position        = UDim2.new(h, 0, 0.5, 0)
-                    hexBox.Text               = toHex(color)
+                    -- FIX #13: update hex live without firing Changed recursively
+                    if not _suppressHex then
+                        hexBox.Text = toHex(color)
+                    end
                     changed:Fire(color)
                     Win._debouncedSave()
                 end
                 commit()
+
+                -- FIX #13: live hex update with debounce + red on bad input
+                local hexDebounce = debounce(function()
+                    local txt = hexBox.Text:gsub("#", "")
+                    if #txt == 6 then
+                        local r_ = tonumber(txt:sub(1, 2), 16)
+                        local g_ = tonumber(txt:sub(3, 4), 16)
+                        local b_ = tonumber(txt:sub(5, 6), 16)
+                        if r_ and g_ and b_ then
+                            tw(hexStroke, TI_Q, { Color = theme.Primary, Transparency = 0.5 })
+                            _suppressHex = true
+                            h, s, v = colorToHsv(Color3.fromRGB(r_, g_, b_))
+                            commit()
+                            _suppressHex = false
+                        else
+                            tw(hexStroke, TI_Q, { Color = theme.Destructive, Transparency = 0.4 })
+                        end
+                    else
+                        -- partial input: show red stroke if non-empty
+                        if #txt > 0 then
+                            tw(hexStroke, TI_Q, { Color = theme.Destructive, Transparency = 0.4 })
+                        end
+                    end
+                end, 0.25)
+
+                hexBox:GetPropertyChangedSignal("Text"):Connect(function()
+                    if not hexBox:IsFocused() then return end
+                    hexDebounce()
+                end)
+
+                -- FIX #13: also apply on FocusLost (final commit)
+                hexBox.FocusLost:Connect(function()
+                    local txt = hexBox.Text:gsub("#", "")
+                    if #txt == 6 then
+                        local r_ = tonumber(txt:sub(1, 2), 16)
+                        local g_ = tonumber(txt:sub(3, 4), 16)
+                        local b_ = tonumber(txt:sub(5, 6), 16)
+                        if r_ and g_ and b_ then
+                            tw(hexStroke, TI_Q, { Color = theme.Border, Transparency = 0.9 })
+                            _suppressHex = true
+                            h, s, v = colorToHsv(Color3.fromRGB(r_, g_, b_))
+                            commit()
+                            _suppressHex = false
+                        else
+                            tw(hexStroke, TI_Q, { Color = theme.Destructive, Transparency = 0.4 })
+                            task.delay(0.8, function()
+                                hexBox.Text = toHex(color)
+                                tw(hexStroke, TI_Q, { Color = theme.Border, Transparency = 0.9 })
+                            end)
+                        end
+                    else
+                        hexBox.Text = toHex(color)
+                        tw(hexStroke, TI_Q, { Color = theme.Border, Transparency = 0.9 })
+                    end
+                end)
 
                 local svDrag = false
                 local svU1 = routerListen("_began", function(input)
@@ -2242,18 +2534,6 @@ function Library:Window(opts)
                     table.insert(Win._connections, u)
                 end
 
-                hexBox.FocusLost:Connect(function()
-                    local txt = hexBox.Text:gsub("#", "")
-                    if #txt == 6 then
-                        local r = tonumber(txt:sub(1,2), 16)
-                        local g = tonumber(txt:sub(3,4), 16)
-                        local b = tonumber(txt:sub(5,6), 16)
-                        if r and g and b then
-                            h, s, v = colorToHsv(Color3.fromRGB(r, g, b)); commit()
-                        end
-                    end
-                end)
-
                 local opened = false
                 swatch.MouseButton1Click:Connect(function()
                     opened = not opened
@@ -2285,14 +2565,14 @@ function Library:Window(opts)
                 new("TextLabel", {
                     BackgroundTransparency = 1,
                     Position   = UDim2.new(0, 14, 0, 8), Size = UDim2.new(1, -28, 0, 16),
-                    Font       = FONT_MED, TextSize = 13,
+                    Font       = FONT_MED, TextSize = ts(13),
                     TextColor3 = theme.Foreground, TextXAlignment = Enum.TextXAlignment.Left,
                     Text       = opts2.Label or "Progress", Parent = f,
                 })
                 local pct = new("TextLabel", {
                     BackgroundTransparency = 1,
                     Position   = UDim2.new(1, -60, 0, 8), Size = UDim2.new(0, 48, 0, 16),
-                    Font       = FONT_MED, TextSize = 12,
+                    Font       = FONT_MED, TextSize = ts(12),
                     TextColor3 = theme.Primary, TextXAlignment = Enum.TextXAlignment.Right,
                     Text       = tostring(val) .. suffix, Parent = f,
                 })
@@ -2332,10 +2612,10 @@ function Library:Window(opts)
                 local colW = #cols > 0 and (1 / #cols) or 1
 
                 local f = new("Frame", {
-                    Size          = UDim2.new(1, 0, 0, 0),
-                    AutomaticSize = Enum.AutomaticSize.Y,
+                    Size             = UDim2.new(1, 0, 0, 0),
+                    AutomaticSize    = Enum.AutomaticSize.Y,
                     BackgroundColor3 = theme.Card,
-                    Parent        = Page,
+                    Parent           = Page,
                 })
                 corner(f, R_MD)
                 stroke(f, theme.Border, 1, 0.9)
@@ -2347,8 +2627,9 @@ function Library:Window(opts)
                     new("TextLabel", {
                         BackgroundTransparency = 1,
                         Size                   = UDim2.new(1, 0, 0, 20),
-                        Font                   = FONT_BOLD, TextSize = 12,
-                        TextColor3             = theme.Primary, TextXAlignment = Enum.TextXAlignment.Left,
+                        Font                   = FONT_BOLD, TextSize = ts(12),
+                        TextColor3             = theme.Primary,
+                        TextXAlignment         = Enum.TextXAlignment.Left,
                         Text                   = opts2.Label, Parent = f,
                     })
                 end
@@ -2365,10 +2646,10 @@ function Library:Window(opts)
                         local cell = type(data) == "table" and (data[col] or data[i] or "") or ""
                         new("TextLabel", {
                             BackgroundTransparency = 1,
-                            Position               = UDim2.new((i-1)*colW, 0, 0, 0),
+                            Position               = UDim2.new((i - 1) * colW, 0, 0, 0),
                             Size                   = UDim2.new(colW, -4, 1, 0),
                             Font                   = isHeader and FONT_BOLD or FONT_REG,
-                            TextSize               = 12,
+                            TextSize               = ts(12),
                             TextColor3             = isHeader and theme.Foreground or theme.MutedForeground,
                             TextXAlignment         = Enum.TextXAlignment.Left,
                             TextTruncate           = Enum.TextTruncate.AtEnd,
@@ -2398,9 +2679,12 @@ function Library:Window(opts)
 
                 local api = {}
                 function api:SetRows(newRows) rows = newRows or {}; buildRows() end
-                function api:AddRow(row)      table.insert(rows, row); table.insert(rowFrames, makeRow(row, false)) end
-                function api:Clear()          rows = {}; buildRows() end
-                function api:Remove()         f:Destroy() end
+                function api:AddRow(row)
+                    table.insert(rows, row)
+                    table.insert(rowFrames, makeRow(row, false))
+                end
+                function api:Clear()  rows = {}; buildRows() end
+                function api:Remove() f:Destroy() end
                 return api
             end
 
@@ -2408,31 +2692,20 @@ function Library:Window(opts)
         end -- buildTab
 
         -- ================================================================
-        -- Public Win:Tab — wraps the internal factory
+        -- Public Win:Tab
         -- ================================================================
         function Win:Tab(name)
             return buildTab(name)
         end
 
         -- ================================================================
-        -- CREDITS TAB  — always appended automatically
-        -- WHY: Every script using this library automatically gets a branded
-        --      credits page with no work from the script author. Keeps
-        --      attribution consistent and adds a polished finishing touch.
+        -- CREDITS TAB (auto-appended)
         -- ================================================================
         local function appendCreditsTab()
-            local tab = buildTab("Credits")
-            -- Override the tab button text color slightly so it looks
-            -- intentionally distinct (subtle Primary tint)
-            if tab._btn then
-                tab._btn.TextColor3 = Themes.Default.MutedForeground
-            end
-
+            local tab  = buildTab("Credits")
             local page = tab._page
-            -- Clear default listL padding; we'll center manually
             page.AutomaticCanvasSize = Enum.AutomaticSize.Y
 
-            -- ── Centred credits card ──────────────────────────────────────
             local cardF = new("Frame", {
                 AnchorPoint      = Vector2.new(0.5, 0),
                 Position         = UDim2.new(0.5, 0, 0, 24),
@@ -2445,7 +2718,6 @@ function Library:Window(opts)
             stroke(cardF, theme.Border, 1, 0.86)
             sheen(cardF)
 
-            -- MRC logo badge (large centered pill)
             local badge = new("Frame", {
                 AnchorPoint      = Vector2.new(0.5, 0),
                 Position         = UDim2.new(0.5, 0, 0, 22),
@@ -2459,35 +2731,32 @@ function Library:Window(opts)
             new("TextLabel", {
                 BackgroundTransparency = 1,
                 Size                   = UDim2.new(1, 0, 1, 0),
-                Font                   = FONT_BOLD, TextSize = 22,
+                Font                   = FONT_BOLD, TextSize = ts(22),
                 TextColor3             = theme.Primary,
                 Text                   = "M",
                 Parent                 = badge,
             })
 
-            -- Library name
             new("TextLabel", {
                 BackgroundTransparency = 1,
                 Position               = UDim2.new(0, 0, 0, 96),
                 Size                   = UDim2.new(1, 0, 0, 22),
-                Font                   = FONT_BOLD, TextSize = 16,
+                Font                   = FONT_BOLD, TextSize = ts(16),
                 TextColor3             = theme.Foreground,
-                Text                   = "MRC UI  v1.1.0",
+                Text                   = "MRC UI  v1.2.0",
                 Parent                 = cardF,
             })
 
-            -- Author line
             new("TextLabel", {
                 BackgroundTransparency = 1,
                 Position               = UDim2.new(0, 0, 0, 122),
                 Size                   = UDim2.new(1, 0, 0, 16),
-                Font                   = FONT_REG, TextSize = 12,
+                Font                   = FONT_REG, TextSize = ts(12),
                 TextColor3             = theme.MutedForeground,
                 Text                   = "Made by  mrc__s",
                 Parent                 = cardF,
             })
 
-            -- Divider
             new("Frame", {
                 AnchorPoint            = Vector2.new(0.5, 0),
                 Position               = UDim2.new(0.5, 0, 0, 146),
@@ -2498,25 +2767,23 @@ function Library:Window(opts)
                 Parent                 = cardF,
             })
 
-            -- Discord line
             new("TextLabel", {
                 BackgroundTransparency = 1,
                 Position               = UDim2.new(0, 0, 0, 154),
                 Size                   = UDim2.new(1, 0, 0, 14),
-                Font                   = FONT_MED, TextSize = 11,
+                Font                   = FONT_MED, TextSize = ts(11),
                 TextColor3             = theme.MutedForeground,
                 Text                   = "discord.gg/YV3GjGw3PY",
                 Parent                 = cardF,
             })
 
-            -- Copy invite button
             local copyBtn = new("TextButton", {
                 AnchorPoint      = Vector2.new(0.5, 0),
                 Position         = UDim2.new(0.5, 0, 0, 176),
                 Size             = UDim2.new(0, 140, 0, 30),
                 BackgroundColor3 = theme.Accent,
                 TextColor3       = theme.Primary,
-                Font             = FONT_MED, TextSize = 12,
+                Font             = FONT_MED, TextSize = ts(12),
                 Text             = "Copy Invite Link",
                 AutoButtonColor  = false,
                 BorderSizePixel  = 0,
@@ -2524,7 +2791,6 @@ function Library:Window(opts)
             })
             corner(copyBtn, R_MD)
             stroke(copyBtn, theme.Primary, 1, 0.70)
-
             copyBtn.MouseEnter:Connect(function()
                 tw(copyBtn, TI_Q, { BackgroundColor3 = theme.Primary, TextColor3 = theme.PrimaryForeground })
             end)
@@ -2545,13 +2811,12 @@ function Library:Window(opts)
                 end)
             end)
 
-            -- Version footer
             new("TextLabel", {
                 BackgroundTransparency = 1,
                 AnchorPoint            = Vector2.new(0.5, 0),
                 Position               = UDim2.new(0.5, 0, 0, 260),
                 Size                   = UDim2.new(0, 300, 0, 14),
-                Font                   = FONT_REG, TextSize = 10,
+                Font                   = FONT_REG, TextSize = ts(10),
                 TextColor3             = theme.MutedForeground,
                 Text                   = "MRC UI is free software. Use responsibly.",
                 Parent                 = page,
