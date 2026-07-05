@@ -120,7 +120,7 @@ function Library:CreateWindow(TitleText: string, CreateUI: boolean?)
 	Watermark.Parent = FullscreenBG
 	Watermark.BackgroundTransparency = 1
 	Watermark.Size = UDim2.new(1, 0, 1, 0)
-	Watermark.Image = "rbxassetid://96237222218741"
+	Watermark.Image = "rbxassetid://130215491479789"
 	Watermark.ImageTransparency = 0.92
 
 	-- TITLE
