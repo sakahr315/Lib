@@ -1,5 +1,5 @@
 local Lumen = {
-    Version = "1.0.0",
+    Version = "1.1.0",
     Flags = {},
     Theme = {
         Background = Color3.fromRGB(10, 10, 10),
@@ -8,62 +8,63 @@ local Lumen = {
         Muted      = Color3.fromRGB(180, 180, 180),
     },
 }
- 
+
 local Players      = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local UIS          = game:GetService("UserInputService")
- 
+local HttpService  = game:GetService("HttpService")
+
 local WHITE   = Color3.new(1, 1, 1)
 local EASE    = TweenInfo.new(0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 local FAST    = TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local INSTANT = TweenInfo.new(0)
 local LOOP    = TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
- 
-----------------------------------------------------------------------
--- helpers
-----------------------------------------------------------------------
- 
+
 local function mk(class, props, parent)
     local o = Instance.new(class)
     for k, v in pairs(props) do o[k] = v end
     o.Parent = parent
     return o
 end
- 
+
 local function tween(o, info, props)
     local t = TweenService:Create(o, info, props)
     t:Play()
     return t
 end
- 
+
 local function round(o, r)
     return mk("UICorner", { CornerRadius = UDim.new(0, r) }, o)
 end
- 
+
 local function stroke(o, color, transparency, thickness)
     return mk("UIStroke", {
         Color = color, Transparency = transparency, Thickness = thickness or 1,
         ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
     }, o)
 end
- 
+
 local function safe(cb, ...)
     if type(cb) ~= "function" then return end
     local ok, err = pcall(cb, ...)
     if not ok then warn("[Lumen] callback error: " .. tostring(err)) end
 end
- 
+
 local function assetId(v)
     if v == nil then return nil end
     v = tostring(v)
     if v:find("rbxasset") or v:find("http") then return v end
     return "rbxassetid://" .. v
 end
- 
+
 local function clean(n)
     return math.floor(n * 10000 + 0.5) / 10000
 end
- 
+
+local function fileSafe(s)
+    return (tostring(s):gsub("[^%w_%-%. ]", "_"))
+end
+
 local function getParent()
     local ok, h = pcall(function() return gethui and gethui() end)
     if ok and h then return h end
@@ -71,7 +72,7 @@ local function getParent()
     if ok2 and cg then return cg end
     return Players.LocalPlayer:WaitForChild("PlayerGui")
 end
- 
+
 local function newGui(name)
     local gui = Instance.new("ScreenGui")
     gui.Name = name
@@ -80,24 +81,33 @@ local function newGui(name)
     gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     gui.DisplayOrder = 100
     if syn and syn.protect_gui then pcall(syn.protect_gui, gui) end
-    gui.Parent = getParent()
+    local ok = pcall(function() gui.Parent = getParent() end)
+    if not ok then
+        gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+    end
     return gui
 end
- 
+
 local function clearOld(name)
-    local old = getParent():FindFirstChild(name)
-    if old then old:Destroy() end
+    local ok, parent = pcall(getParent)
+    if ok and parent then
+        local old = parent:FindFirstChild(name)
+        if old then old:Destroy() end
+    end
+    local lp = Players.LocalPlayer
+    local pg = lp and lp:FindFirstChild("PlayerGui")
+    local old2 = pg and pg:FindFirstChild(name)
+    if old2 then old2:Destroy() end
 end
- 
+
 local function isPointer(i)
     return i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch
 end
- 
+
 local function isMove(i)
     return i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch
 end
- 
--- fake radial glow: stacked translucent circles
+
 local function glow(parent, size, pos, n, transparency, color)
     for i = 1, n do
         local s = size * i / n
@@ -109,19 +119,17 @@ local function glow(parent, size, pos, n, transparency, color)
         round(c, 9999)
     end
 end
- 
-----------------------------------------------------------------------
--- notifications
-----------------------------------------------------------------------
- 
+
 local notifGui, notifHolder, notifCount = nil, nil, 0
- 
+local windows = {}
+
 function Lumen:Notify(o)
     o = o or {}
     local T = self.Theme
     local accent = o.Accent or T.Accent
- 
+
     if not (notifGui and notifGui.Parent) then
+        clearOld("Lumen_Notifications")
         notifGui = newGui("Lumen_Notifications")
         notifGui.DisplayOrder = 200
         local cam = workspace.CurrentCamera
@@ -136,13 +144,13 @@ function Lumen:Notify(o)
             HorizontalAlignment = Enum.HorizontalAlignment.Right,
         }, notifHolder)
     end
- 
+
     notifCount += 1
     local wrap = mk("Frame", {
         Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
         BackgroundTransparency = 1, LayoutOrder = notifCount,
     }, notifHolder)
- 
+
     local card = mk("Frame", {
         Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
         Position = UDim2.fromOffset(340, 0), BackgroundColor3 = T.Background,
@@ -155,13 +163,13 @@ function Lumen:Notify(o)
         PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14),
     }, card)
     mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 3) }, card)
- 
+
     mk("TextLabel", {
         LayoutOrder = 1, Size = UDim2.new(1, 0, 0, 18), BackgroundTransparency = 1,
         Font = Enum.Font.GothamBold, Text = o.Title or "Notification",
         TextColor3 = T.Text, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left,
     }, card)
- 
+
     if o.Content and o.Content ~= "" then
         mk("TextLabel", {
             LayoutOrder = 2, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
@@ -170,7 +178,7 @@ function Lumen:Notify(o)
             TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
         }, card)
     end
- 
+
     tween(card, EASE, { Position = UDim2.fromOffset(0, 0) })
     task.delay(o.Duration or 4, function()
         if not card.Parent then return end
@@ -179,11 +187,17 @@ function Lumen:Notify(o)
         wrap:Destroy()
     end)
 end
- 
-----------------------------------------------------------------------
--- window
-----------------------------------------------------------------------
- 
+
+function Lumen:Destroy()
+    for _, w in ipairs(table.clone(windows)) do
+        w:Destroy()
+    end
+    if notifGui then
+        notifGui:Destroy()
+        notifGui, notifHolder = nil, nil
+    end
+end
+
 function Lumen:CreateWindow(opts)
     opts = opts or {}
     local T = self.Theme
@@ -191,30 +205,77 @@ function Lumen:CreateWindow(opts)
     local name = opts.Name or "Lumen"
     local toggleKey = opts.ToggleKey or Enum.KeyCode.RightShift
     local guiName = "Lumen_" .. name
- 
+
     clearOld(guiName)
     local gui = newGui(guiName)
- 
+
     local conns = {}
     local function connect(sig, fn)
         local c = sig:Connect(fn)
         conns[#conns + 1] = c
         return c
     end
- 
-    local win = { Gui = gui }
+
+    local win = { Gui = gui, _listening = false }
     local entries = {}
- 
-    -- sizing
+    local destroyed = false
+    windows[#windows + 1] = win
+
+    local cfg = opts.ConfigurationSaving or {}
+    local saveEnabled, savePath, saved = false, nil, {}
+
+    if cfg.Enabled and type(writefile) == "function" and type(readfile) == "function" then
+        saveEnabled = true
+        local folder = fileSafe(cfg.FolderName or "Lumen")
+        savePath = folder .. "/" .. fileSafe(cfg.FileName or tostring(game.PlaceId)) .. ".json"
+        pcall(function()
+            if type(isfolder) == "function" and not isfolder(folder) then makefolder(folder) end
+        end)
+        pcall(function()
+            if type(isfile) == "function" and isfile(savePath) then
+                saved = HttpService:JSONDecode(readfile(savePath))
+            end
+        end)
+        if type(saved) ~= "table" then saved = {} end
+    end
+
+    local saveQueued = false
+    local function queueSave()
+        if saveQueued then return end
+        saveQueued = true
+        task.delay(0.5, function()
+            saveQueued = false
+            pcall(function() writefile(savePath, HttpService:JSONEncode(saved)) end)
+        end)
+    end
+
+    local function stored(o)
+        if saveEnabled and o.Flag and o.Save ~= false then return saved[o.Flag] end
+    end
+
+    local function persist(o, v)
+        if saveEnabled and o.Flag and o.Save ~= false then
+            saved[o.Flag] = v
+            queueSave()
+        end
+    end
+
+    function win:ResetConfig()
+        saved = {}
+        if saveEnabled then pcall(function() delfile(savePath) end) end
+    end
+
     local cam = workspace.CurrentCamera
     local vp = (cam and cam.ViewportSize) or Vector2.new(1280, 720)
     local baseW, baseH = 580, 400
-    if typeof(opts.Size) == "UDim2" then baseW, baseH = opts.Size.X.Offset, opts.Size.Y.Offset end
+    if typeof(opts.Size) == "UDim2" then
+        baseW = opts.Size.X.Offset + opts.Size.X.Scale * vp.X
+        baseH = opts.Size.Y.Offset + opts.Size.Y.Scale * vp.Y
+    end
     local W, H = math.min(baseW, vp.X - 24), math.min(baseH, vp.Y - 24)
     local SB = (W < 480) and 112 or 156
     local TOP = 54
- 
-    -- main frame
+
     local main = mk("Frame", {
         Name = "Main", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
         Size = UDim2.fromOffset(W, H), BackgroundColor3 = T.Background, BorderSizePixel = 0,
@@ -224,8 +285,7 @@ function Lumen:CreateWindow(opts)
     stroke(main, WHITE, 0.9)
     local scale = mk("UIScale", { Scale = 0.94 }, main)
     tween(scale, EASE, { Scale = 1 })
- 
-    -- background decoration: grid + glow
+
     local decor = mk("Frame", { BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 0 }, main)
     do
         local cx, cy = W / 2, H / 2
@@ -241,8 +301,7 @@ function Lumen:CreateWindow(opts)
         end
         glow(decor, 720, UDim2.new(0.5, 0, 0, -40), 8, 0.982, accent)
     end
- 
-    -- top bar
+
     local top = mk("Frame", { Name = "Top", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, TOP) }, main)
     mk("TextLabel", {
         BackgroundTransparency = 1, Position = UDim2.fromOffset(18, 9), Size = UDim2.new(1, -120, 0, 22),
@@ -256,7 +315,7 @@ function Lumen:CreateWindow(opts)
     }, top)
     mk("Frame", { BackgroundColor3 = WHITE, BackgroundTransparency = 0.94, BorderSizePixel = 0,
         Position = UDim2.new(0, 0, 1, -1), Size = UDim2.new(1, 0, 0, 1) }, top)
- 
+
     local function iconButton(xOff, draw)
         local b = mk("TextButton", {
             AutoButtonColor = false, Text = "", AnchorPoint = Vector2.new(1, 0.5),
@@ -276,7 +335,7 @@ function Lumen:CreateWindow(opts)
         draw(b)
         return b
     end
- 
+
     local minBtn = iconButton(-52, function(b)
         mk("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
             Size = UDim2.fromOffset(10, 2), BackgroundColor3 = T.Text, BorderSizePixel = 0 }, b)
@@ -287,13 +346,12 @@ function Lumen:CreateWindow(opts)
                 Size = UDim2.fromOffset(13, 2), Rotation = r, BackgroundColor3 = T.Text, BorderSizePixel = 0 }, b)
         end
     end)
- 
-    -- body: sidebar + pages
+
     local body = mk("Frame", {
         Name = "Body", BackgroundTransparency = 1, Position = UDim2.fromOffset(0, TOP),
         Size = UDim2.new(1, 0, 1, -TOP), ClipsDescendants = true,
     }, main)
- 
+
     local sidebar = mk("Frame", { BackgroundTransparency = 1, Size = UDim2.new(0, SB, 1, 0) }, body)
     mk("Frame", { BackgroundColor3 = WHITE, BackgroundTransparency = 0.94, BorderSizePixel = 0,
         Position = UDim2.new(1, -1, 0, 0), Size = UDim2.new(0, 1, 1, 0) }, sidebar)
@@ -304,12 +362,11 @@ function Lumen:CreateWindow(opts)
     mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 6) }, tabList)
     mk("UIPadding", { PaddingTop = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10),
         PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) }, tabList)
- 
+
     local pages = mk("Frame", {
         BackgroundTransparency = 1, Position = UDim2.fromOffset(SB, 0), Size = UDim2.new(1, -SB, 1, 0),
     }, body)
- 
-    -- dragging
+
     do
         local dragging, startPos, startUi = false, nil, nil
         connect(top.InputBegan, function(i)
@@ -327,10 +384,9 @@ function Lumen:CreateWindow(opts)
             end
         end)
     end
- 
-    -- visibility / minimize
+
     local visible, minimized = true, false
- 
+
     local function setVisible(v)
         if v == visible then return end
         visible = v
@@ -343,7 +399,7 @@ function Lumen:CreateWindow(opts)
             task.delay(0.18, function() if not visible then main.Visible = false end end)
         end
     end
- 
+
     local function setMinimized(v)
         minimized = v
         if v then
@@ -354,7 +410,7 @@ function Lumen:CreateWindow(opts)
             tween(main, EASE, { Size = UDim2.fromOffset(W, H) })
         end
     end
- 
+
     connect(minBtn.MouseButton1Click, function() setMinimized(not minimized) end)
     connect(closeBtn.MouseButton1Click, function()
         if opts.CloseAction == "Destroy" then
@@ -366,10 +422,10 @@ function Lumen:CreateWindow(opts)
     end)
     connect(UIS.InputBegan, function(i, gp)
         if gp then return end
+        if win._listening then return end
         if i.KeyCode == toggleKey then setVisible(not visible) end
     end)
- 
-    -- floating toggle button (default: touch devices only)
+
     local wantFloat = opts.FloatingButton
     if wantFloat == nil then wantFloat = UIS.TouchEnabled and not UIS.MouseEnabled end
     if wantFloat then
@@ -396,7 +452,7 @@ function Lumen:CreateWindow(opts)
         fb.MouseLeave:Connect(function() tween(fs, FAST, { Transparency = 0.45 }) end)
         connect(fb.MouseButton1Click, function() setVisible(not visible) end)
     end
- 
+
     local function selectEntry(sel)
         for _, e in ipairs(entries) do
             local on = (e == sel)
@@ -407,11 +463,7 @@ function Lumen:CreateWindow(opts)
             if e.img then tween(e.img, FAST, { ImageColor3 = on and accent or T.Muted }) end
         end
     end
- 
-    ------------------------------------------------------------------
-    -- window API
-    ------------------------------------------------------------------
- 
+
     function win:Show() setVisible(true) end
     function win:Hide() setVisible(false) end
     function win:Toggle() setVisible(not visible) end
@@ -421,19 +473,19 @@ function Lumen:CreateWindow(opts)
     function win:SelectTab(tab) if tab and tab._entry then selectEntry(tab._entry) end end
     function win:Notify(o) o = o or {} o.Accent = o.Accent or accent Lumen:Notify(o) end
     function win:Destroy()
+        if destroyed then return end
+        destroyed = true
         for _, c in ipairs(conns) do c:Disconnect() end
         table.clear(conns)
+        local idx = table.find(windows, win)
+        if idx then table.remove(windows, idx) end
         gui:Destroy()
     end
- 
-    ------------------------------------------------------------------
-    -- tabs + elements
-    ------------------------------------------------------------------
- 
+
     function win:CreateTab(tabName, icon)
         tabName = tabName or "Tab"
         local tab = {}
- 
+
         local btn = mk("TextButton", {
             Name = tabName, AutoButtonColor = false, Text = "", Size = UDim2.new(1, 0, 0, 36),
             BackgroundColor3 = WHITE, BackgroundTransparency = 1, BorderSizePixel = 0, LayoutOrder = #entries + 1,
@@ -454,7 +506,7 @@ function Lumen:CreateWindow(opts)
             Font = Enum.Font.GothamMedium, Text = tabName, TextColor3 = T.Muted, TextSize = 14,
             TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
         }, btn)
- 
+
         local page = mk("ScrollingFrame", {
             Name = tabName, Visible = false, BackgroundTransparency = 1, BorderSizePixel = 0,
             Size = UDim2.fromScale(1, 1), CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
@@ -463,20 +515,20 @@ function Lumen:CreateWindow(opts)
         mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8) }, page)
         mk("UIPadding", { PaddingTop = UDim.new(0, 14), PaddingBottom = UDim.new(0, 14),
             PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14) }, page)
- 
+
         local entry = { btn = btn, bar = bar, lbl = lbl, img = img, page = page }
         entries[#entries + 1] = entry
         tab._entry = entry
         connect(btn.MouseButton1Click, function() selectEntry(entry) end)
         if #entries == 1 then selectEntry(entry) end
- 
+
         local order = 0
         local function nextOrder() order += 1 return order end
- 
+
         local function register(flag, obj)
             if flag then Lumen.Flags[flag] = obj end
         end
- 
+
         local function card(h)
             local c = mk("Frame", {
                 Size = UDim2.new(1, 0, 0, h), BackgroundColor3 = WHITE, BackgroundTransparency = 0.97,
@@ -494,7 +546,7 @@ function Lumen:CreateWindow(opts)
             end)
             return c, s
         end
- 
+
         local function nameLabel(parent, text, rightPad)
             return mk("TextLabel", {
                 BackgroundTransparency = 1, Position = UDim2.fromOffset(16, 0),
@@ -503,8 +555,7 @@ function Lumen:CreateWindow(opts)
                 TextTruncate = Enum.TextTruncate.AtEnd,
             }, parent)
         end
- 
-        -- Section ---------------------------------------------------
+
         function tab:CreateSection(text)
             local l = mk("TextLabel", {
                 BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 26), Font = Enum.Font.GothamBold,
@@ -517,8 +568,7 @@ function Lumen:CreateWindow(opts)
             function obj:Destroy() l:Destroy() end
             return obj
         end
- 
-        -- Label -----------------------------------------------------
+
         function tab:CreateLabel(text)
             local c = card(34)
             local l = mk("TextLabel", {
@@ -531,8 +581,7 @@ function Lumen:CreateWindow(opts)
             function obj:Destroy() c:Destroy() end
             return obj
         end
- 
-        -- Paragraph -------------------------------------------------
+
         function tab:CreateParagraph(o)
             o = o or {}
             local c = card(0)
@@ -553,8 +602,7 @@ function Lumen:CreateWindow(opts)
             function obj:Destroy() c:Destroy() end
             return obj
         end
- 
-        -- Button ----------------------------------------------------
+
         function tab:CreateButton(o)
             o = o or {}
             local c = card(44)
@@ -578,11 +626,13 @@ function Lumen:CreateWindow(opts)
             function obj:Destroy() c:Destroy() end
             return obj
         end
- 
-        -- Toggle ----------------------------------------------------
+
         function tab:CreateToggle(o)
             o = o or {}
             local state = o.CurrentValue == true
+            local s = stored(o)
+            if type(s) == "boolean" then state = s end
+
             local c = card(44)
             nameLabel(c, o.Name or "Toggle", 70)
             local sw = mk("Frame", { AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -14, 0.5, 0),
@@ -592,7 +642,7 @@ function Lumen:CreateWindow(opts)
             local knob = mk("Frame", { AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 3, 0.5, 0),
                 Size = UDim2.fromOffset(16, 16), BackgroundColor3 = WHITE, BorderSizePixel = 0 }, sw)
             round(knob, 9999)
- 
+
             local obj = { CurrentValue = state }
             local function render(animate)
                 local info = animate and FAST or INSTANT
@@ -603,28 +653,30 @@ function Lumen:CreateWindow(opts)
                 state = v and true or false
                 obj.CurrentValue = state
                 render(true)
+                persist(o, state)
                 safe(o.Callback, state)
             end
             function obj:Destroy() c:Destroy() end
- 
+
             local click = mk("TextButton", { BackgroundTransparency = 1, Text = "", Size = UDim2.fromScale(1, 1), ZIndex = 2 }, c)
             connect(click.MouseButton1Click, function() obj:Set(not state) end)
- 
+
             render(false)
             register(o.Flag, obj)
             safe(o.Callback, state)
             return obj
         end
- 
-        -- Slider ----------------------------------------------------
+
         function tab:CreateSlider(o)
             o = o or {}
             local range = o.Range or { 0, 100 }
             local min, max = range[1], range[2]
             local inc = o.Increment or 1
             local value = math.clamp(o.CurrentValue or min, min, max)
+            local s = stored(o)
+            if type(s) == "number" then value = math.clamp(s, min, max) end
             local suffix = o.Suffix and (" " .. o.Suffix) or ""
- 
+
             local c = card(58)
             nameLabel(c, o.Name or "Slider", 110).Size = UDim2.new(1, -126, 0, 34)
             local valLbl = mk("TextLabel", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -16, 0, 0),
@@ -639,7 +691,7 @@ function Lumen:CreateWindow(opts)
                 Size = UDim2.fromOffset(14, 14), BackgroundColor3 = WHITE, BorderSizePixel = 0, ZIndex = 3 }, track)
             round(knob, 9999)
             stroke(knob, accent, 0.3, 2)
- 
+
             local obj = { CurrentValue = value }
             local function render()
                 local a = (max > min) and (value - min) / (max - min) or 0
@@ -653,11 +705,12 @@ function Lumen:CreateWindow(opts)
                 value = v
                 obj.CurrentValue = v
                 render()
+                persist(o, v)
                 safe(o.Callback, v)
             end
             function obj:Set(v) set(v, true) end
             function obj:Destroy() c:Destroy() end
- 
+
             local hit = mk("TextButton", { BackgroundTransparency = 1, Text = "", Position = UDim2.new(0, 8, 0, 30),
                 Size = UDim2.new(1, -16, 0, 26), ZIndex = 4 }, c)
             local dragging = false
@@ -666,52 +719,68 @@ function Lumen:CreateWindow(opts)
                 set(min + (max - min) * rel)
             end
             connect(hit.InputBegan, function(i)
-                if isPointer(i) then dragging = true fromX(i.Position.X) end
+                if isPointer(i) then
+                    dragging = true
+                    page.ScrollingEnabled = false
+                    fromX(i.Position.X)
+                end
             end)
             connect(UIS.InputChanged, function(i)
                 if dragging and isMove(i) then fromX(i.Position.X) end
             end)
             connect(UIS.InputEnded, function(i)
-                if isPointer(i) then dragging = false end
+                if isPointer(i) and dragging then
+                    dragging = false
+                    page.ScrollingEnabled = true
+                end
             end)
- 
+
             render()
             register(o.Flag, obj)
             safe(o.Callback, value)
             return obj
         end
- 
-        -- Input -----------------------------------------------------
+
         function tab:CreateInput(o)
             o = o or {}
+            local s = stored(o)
+            local hasSaved = type(s) == "string"
+            local initial = hasSaved and s or (o.CurrentValue or "")
+
             local c = card(44)
             nameLabel(c, o.Name or "Input", 176)
             local tb = mk("TextBox", {
                 AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -12, 0.5, 0), Size = UDim2.fromOffset(150, 28),
                 BackgroundColor3 = WHITE, BackgroundTransparency = 0.94, BorderSizePixel = 0, Font = Enum.Font.Gotham,
-                Text = o.CurrentValue or "", PlaceholderText = o.PlaceholderText or "Type here...",
+                Text = initial, PlaceholderText = o.PlaceholderText or "Type here...",
                 PlaceholderColor3 = T.Muted, TextColor3 = T.Text, TextSize = 13, ClearTextOnFocus = false,
                 TextTruncate = Enum.TextTruncate.AtEnd,
             }, c)
             round(tb, 8)
-            local s = stroke(tb, WHITE, 0.94)
+            local st = stroke(tb, WHITE, 0.94)
             mk("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8) }, tb)
-            connect(tb.Focused, function() tween(s, FAST, { Color = accent, Transparency = 0.3 }) end)
- 
+            connect(tb.Focused, function() tween(st, FAST, { Color = accent, Transparency = 0.3 }) end)
+
             local obj = { CurrentValue = tb.Text }
             connect(tb.FocusLost, function()
-                tween(s, FAST, { Color = WHITE, Transparency = 0.94 })
+                tween(st, FAST, { Color = WHITE, Transparency = 0.94 })
                 obj.CurrentValue = tb.Text
+                if not o.RemoveTextAfterFocusLost then persist(o, tb.Text) end
                 safe(o.Callback, tb.Text)
                 if o.RemoveTextAfterFocusLost then tb.Text = "" end
             end)
-            function obj:Set(text) tb.Text = text obj.CurrentValue = text safe(o.Callback, text) end
+            function obj:Set(text)
+                tb.Text = text
+                obj.CurrentValue = text
+                persist(o, text)
+                safe(o.Callback, text)
+            end
             function obj:Destroy() c:Destroy() end
             register(o.Flag, obj)
+            if hasSaved then safe(o.Callback, initial) end
             return obj
         end
- 
-        -- Keybind ---------------------------------------------------
+
         function tab:CreateKeybind(o)
             o = o or {}
             local function norm(k)
@@ -719,8 +788,10 @@ function Lumen:CreateWindow(opts)
                 return tostring(k or "E")
             end
             local key = norm(o.CurrentKeybind)
+            local s = stored(o)
+            if type(s) == "string" then key = s end
             local listening = false
- 
+
             local c = card(44)
             nameLabel(c, o.Name or "Keybind", 100)
             local kb = mk("TextButton", { AutoButtonColor = false, AnchorPoint = Vector2.new(1, 0.5),
@@ -729,16 +800,26 @@ function Lumen:CreateWindow(opts)
                 TextColor3 = accent, TextSize = 12 }, c)
             round(kb, 8)
             stroke(kb, WHITE, 0.94)
- 
+
             local obj = { CurrentKeybind = key }
-            function obj:Set(k) key = norm(k) obj.CurrentKeybind = key kb.Text = key end
+            function obj:Set(k)
+                key = norm(k)
+                obj.CurrentKeybind = key
+                kb.Text = key
+                persist(o, key)
+            end
             function obj:Destroy() c:Destroy() end
- 
-            connect(kb.MouseButton1Click, function() listening = true kb.Text = "..." end)
+
+            connect(kb.MouseButton1Click, function()
+                listening = true
+                win._listening = true
+                kb.Text = "..."
+            end)
             connect(UIS.InputBegan, function(i, gp)
                 if listening then
                     if i.UserInputType == Enum.UserInputType.Keyboard then
                         listening = false
+                        win._listening = false
                         if i.KeyCode ~= Enum.KeyCode.Escape then
                             obj:Set(i.KeyCode)
                             safe(o.OnChanged, key)
@@ -753,12 +834,11 @@ function Lumen:CreateWindow(opts)
                     safe(o.Callback, key)
                 end
             end)
- 
+
             register(o.Flag, obj)
             return obj
         end
- 
-        -- Dropdown --------------------------------------------------
+
         function tab:CreateDropdown(o)
             o = o or {}
             local HEAD, ROW, MAXROWS = 44, 30, 6
@@ -767,16 +847,26 @@ function Lumen:CreateWindow(opts)
             local selected = {}
             local init = o.CurrentOption
             if type(init) == "string" then init = { init } end
+
+            local s = stored(o)
+            if type(s) == "table" then
+                local ok = {}
+                for _, v in ipairs(s) do
+                    if table.find(options, v) then ok[#ok + 1] = v end
+                end
+                init = ok
+            end
+
             for _, v in ipairs(init or {}) do
                 selected[v] = true
                 if not multi then break end
             end
- 
+
             local c = card(HEAD)
             c.ClipsDescendants = true
             local obj = { CurrentOption = {} }
             local open = false
- 
+
             nameLabel(c, o.Name or "Dropdown", 16).Size = UDim2.new(0.5, -16, 0, HEAD)
             local valLbl = mk("TextLabel", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -40, 0, 0),
                 Size = UDim2.new(0.5, -40, 0, HEAD), BackgroundTransparency = 1, Font = Enum.Font.GothamMedium,
@@ -785,12 +875,12 @@ function Lumen:CreateWindow(opts)
             local chev = mk("TextLabel", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -14, 0, 0),
                 Size = UDim2.fromOffset(16, HEAD), BackgroundTransparency = 1, Font = Enum.Font.GothamBold,
                 Text = "v", TextColor3 = T.Muted, TextSize = 13 }, c)
- 
+
             local listFrame = mk("ScrollingFrame", { BackgroundTransparency = 1, BorderSizePixel = 0,
                 Position = UDim2.fromOffset(10, HEAD), Size = UDim2.new(1, -20, 0, 0), CanvasSize = UDim2.new(),
                 AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollBarThickness = 2, ScrollBarImageColor3 = accent }, c)
             mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 2) }, listFrame)
- 
+
             local function currentList()
                 local out = {}
                 for _, opt in ipairs(options) do
@@ -798,11 +888,11 @@ function Lumen:CreateWindow(opts)
                 end
                 return out
             end
- 
+
             local function applySize()
                 tween(c, FAST, { Size = UDim2.new(1, 0, 0, open and (HEAD + listFrame.Size.Y.Offset + 10) or HEAD) })
             end
- 
+
             local rebuild
             rebuild = function()
                 local pos = listFrame.CanvasPosition
@@ -827,6 +917,7 @@ function Lumen:CreateWindow(opts)
                             tween(chev, FAST, { Rotation = 0 })
                         end
                         rebuild()
+                        persist(o, obj.CurrentOption)
                         safe(o.Callback, obj.CurrentOption)
                     end)
                 end
@@ -839,14 +930,14 @@ function Lumen:CreateWindow(opts)
                 valLbl.Text = #names > 0 and table.concat(names, ", ") or "None"
                 applySize()
             end
- 
+
             local head = mk("TextButton", { BackgroundTransparency = 1, Text = "", Size = UDim2.new(1, 0, 0, HEAD), ZIndex = 2 }, c)
             connect(head.MouseButton1Click, function()
                 open = not open
                 tween(chev, FAST, { Rotation = open and 180 or 0 })
                 applySize()
             end)
- 
+
             function obj:Set(v)
                 if type(v) == "string" then v = { v } end
                 selected = {}
@@ -855,6 +946,7 @@ function Lumen:CreateWindow(opts)
                     if not multi then break end
                 end
                 rebuild()
+                persist(o, obj.CurrentOption)
                 safe(o.Callback, obj.CurrentOption)
             end
             function obj:Refresh(newOptions)
@@ -867,18 +959,17 @@ function Lumen:CreateWindow(opts)
                 rebuild()
             end
             function obj:Destroy() c:Destroy() end
- 
+
             rebuild()
             register(o.Flag, obj)
             safe(o.Callback, obj.CurrentOption)
             return obj
         end
- 
+
         return tab
     end
- 
+
     return win
 end
- 
+
 return Lumen
- 
